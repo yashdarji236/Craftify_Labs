@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useRouter } from '../router/Router';
 import { authService } from '../services/api';
 import {
   LogOut,
@@ -27,6 +28,7 @@ import Toast from '../components/Toast';
 
 export default function HomePage() {
   const { user, token, logout } = useAuth();
+  const { navigate } = useRouter();
   const [activeTab, setActiveTab] = useState('overview');
   const [toast, setToast] = useState({ message: '', type: 'info' });
   const [copiedToken, setCopiedToken] = useState(false);
@@ -193,6 +195,12 @@ export default function HomePage() {
 
           {/* Desktop Nav Links */}
           <nav className="hidden md:flex items-center gap-1 bg-white/[0.03] border border-white/10 p-1 rounded-xl">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/40 border border-indigo-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Projects Dashboard</span>
+            </button>
             <button
               onClick={() => setActiveTab('overview')}
               className={`px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
