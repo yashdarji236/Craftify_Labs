@@ -253,6 +253,19 @@ export const NODE_REGISTRY = Object.freeze({
 });
 
 /**
+ * Standard default typographical styles for each semantic heading level.
+ * Used when switching levels to ensure immediate visual responsiveness on canvas.
+ */
+export const HEADING_LEVEL_DEFAULTS = Object.freeze({
+  h1: { fontSize: '44px', fontWeight: '800', lineHeight: '1.15' },
+  h2: { fontSize: '32px', fontWeight: '700', lineHeight: '1.2' },
+  h3: { fontSize: '24px', fontWeight: '700', lineHeight: '1.25' },
+  h4: { fontSize: '20px', fontWeight: '600', lineHeight: '1.3' },
+  h5: { fontSize: '16px', fontWeight: '600', lineHeight: '1.35' },
+  h6: { fontSize: '13px', fontWeight: '600', lineHeight: '1.4' },
+});
+
+/**
  * Validates whether childType can be placed inside parentType.
  * @param {string} parentType
  * @param {string} childType

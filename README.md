@@ -8,6 +8,8 @@ A modern, high-performance visual website builder where users design responsive 
 
 Comprehensive architecture, testing, and multi-tenant security plans:
 - [Architecture & Tech Stack Documentation](file:///d:/Ai-web-builder/docs/ARCHITECTURE.md)
+- [Document Model Specification](file:///d:/Ai-web-builder/docs/DOCUMENT_MODEL.md)
+- [Visual Editor Architecture (Phase 2)](file:///d:/Ai-web-builder/docs/EDITOR.md)
 - [Authentication Smoke Test Matrix](file:///d:/Ai-web-builder/docs/AUTH_SMOKE_TEST.md)
 - [Project Ownership & Authorization Plan](file:///d:/Ai-web-builder/docs/OWNERSHIP_PLAN.md)
 
@@ -118,7 +120,16 @@ npm start
 
 ## Testing & Verification
 
-Execute the authentication smoke test suite:
+### Unit & Integration Test Suite
+Run the full builder and editor command test suite:
+```bash
+cd Frontend
+npm test
+```
+*Executes all 21 unit tests covering model validation, tree operations, commands, URL sanitization, and undo/redo stacks.*
+
+### Authentication Smoke Tests
+Execute the authentication smoke test suite against running backend:
 ```bash
 node -e "
 async function test() {

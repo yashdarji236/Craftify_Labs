@@ -11,6 +11,7 @@
     "test": "node --test src/builder/__tests__/*.test.js"
   },
   "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "lucide-react": "^1.54.0",
     "react": "^19.2.0",

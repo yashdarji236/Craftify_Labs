@@ -4,7 +4,7 @@
  */
 
 import { generateId } from './id.js';
-import { NODE_REGISTRY } from './registry.js';
+import { NODE_REGISTRY, HEADING_LEVEL_DEFAULTS } from './registry.js';
 import {
   NODE_TYPES,
   createDefaultResponsiveStyles,
@@ -23,6 +23,11 @@ export function createNode(type, overrides = {}) {
   }
 
   const def = NODE_REGISTRY[type];
+  const headingDefaults =
+    type === 'Heading'
+      ? HEADING_LEVEL_DEFAULTS[(overrides.props?.level || def.defaultProps?.level || 'h2').toLowerCase()] || {}
+      : {};
+
   const node = {
     id: overrides.id || generateId(type.toLowerCase()),
     type,
@@ -33,6 +38,7 @@ export function createNode(type, overrides = {}) {
     },
     styles: {
       ...def.defaultStyles,
+      ...headingDefaults,
       ...(overrides.styles || {}),
     },
     responsiveStyles: overrides.responsiveStyles || createDefaultResponsiveStyles(),
@@ -237,3 +243,71 @@ export function cloneNode(node) {
     interactions: node.interactions ? JSON.parse(JSON.stringify(node.interactions)) : [],
   };
 }
+
+/**
+ * Moves a node up one position among its siblings within the same parent.
+ * Returns the new immutable rootNode, or original rootNode if already at top.
+ * @param {object} rootNode
+ * @param {string} targetId
+ * @returns {object}
+ */
+export function moveUp(rootNode, targetId) {
+  const loc = findParent(rootNode, targetId);
+  if (!loc || loc.index <= 0) return rootNode;
+
+  const { parent, index } = loc;
+  const newChildren = [...parent.children];
+  const temp = newChildren[index];
+  newChildren[index] = newChildren[index - 1];
+  newChildren[index - 1] = temp;
+
+  return updateNode(rootNode, parent.id, { children: newChildren });
+}
+
+/**
+ * Moves a node down one position among its siblings within the same parent.
+ * Returns the new immutable rootNode, or original rootNode if already at bottom.
+ * @param {object} rootNode
+ * @param {string} targetId
+ * @returns {object}
+ */
+export function moveDown(rootNode, targetId) {
+  const loc = findParent(rootNode, targetId);
+  if (!loc || loc.index >= loc.parent.children.length - 1) return rootNode;
+
+  const { parent, index } = loc;
+  const newChildren = [...parent.children];
+  const temp = newChildren[index];
+  newChildren[index] = newChildren[index + 1];
+  newChildren[index + 1] = temp;
+
+  return updateNode(rootNode, parent.id, { children: newChildren });
+}
+
+/**
+ * Duplicates a node in place (right after the original) with fresh IDs.
+ * Returns { newRoot, clonedNode }.
+ * @param {object} rootNode
+ * @param {string} targetId
+ * @returns {{ newRoot: object, clonedNode: object }}
+ */
+export function duplicateNode(rootNode, targetId) {
+  if (rootNode.id === targetId) {
+    throw new Error('Cannot duplicate the page root node.');
+  }
+
+  const target = findNode(rootNode, targetId);
+  if (!target) {
+    throw new Error(`Node "${targetId}" not found in tree.`);
+  }
+
+  const loc = findParent(rootNode, targetId);
+  if (!loc) {
+    throw new Error(`Parent of node "${targetId}" not found.`);
+  }
+
+  const cloned = cloneNode(target);
+  const newRoot = insertNode(rootNode, loc.parent.id, cloned, loc.index + 1);
+  return { newRoot, clonedNode: cloned };
+}
+

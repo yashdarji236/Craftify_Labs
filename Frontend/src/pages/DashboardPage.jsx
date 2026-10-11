@@ -460,11 +460,10 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setTemplateType('demo')}
-                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition-all cursor-pointer ${
-                      templateType === 'demo'
+                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition-all cursor-pointer ${templateType === 'demo'
                         ? 'border-white/40 bg-white/10 text-white shadow-lg'
                         : 'border-white/10 bg-[#0e0e11] text-zinc-400 hover:border-white/20'
-                    }`}
+                      }`}
                   >
                     <div className="font-semibold text-xs flex items-center gap-1.5 text-zinc-100">
                       <Sparkles className="w-3.5 h-3.5 text-zinc-300" />
@@ -476,11 +475,10 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setTemplateType('blank')}
-                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition-all cursor-pointer ${
-                      templateType === 'blank'
+                    className={`p-3.5 rounded-2xl border text-left space-y-1.5 transition-all cursor-pointer ${templateType === 'blank'
                         ? 'border-white/40 bg-white/10 text-white shadow-lg'
                         : 'border-white/10 bg-[#0e0e11] text-zinc-400 hover:border-white/20'
-                    }`}
+                      }`}
                   >
                     <div className="font-semibold text-xs flex items-center gap-1.5 text-zinc-100">
                       <Layout className="w-3.5 h-3.5 text-zinc-300" />
