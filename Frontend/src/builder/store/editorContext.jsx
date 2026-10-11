@@ -3,9 +3,13 @@
  *
  * Implements:
  * - Single source of truth (Project document model)
+ * - Multi-page management (CRUD, unique slugs, home page designation, undoable commands)
+ * - Breakpoints & Responsive style overrides (Desktop base, Tablet & Mobile overrides)
+ * - Asset management integration (IndexedDB Blob storage, Object URL lifecycle)
+ * - Pure health warnings computation & jump actions
  * - Immutable command dispatching with nesting rules enforcement
  * - Structural sharing Undo/Redo history stack with rapid-edit debounced grouping
- * - Separate ephemeral editor state (selectedNodeId, hoveredNodeId, dirty, saveStatus)
+ * - Ephemeral editor state (selectedNodeId, activePageId, activeBreakpoint, hoveredNodeId, dirty, saveStatus)
  * - Auto-save integration with storage adapter
  */
 
@@ -25,6 +29,8 @@ import {
   insertNode,
   removeNode,
   updateNode,
+  cloneNode,
+  generateId,
   moveNode as modelMoveNode,
   moveUp as modelMoveUp,
   moveDown as modelMoveDown,
@@ -33,10 +39,16 @@ import {
   validateProject,
   isSafeUrl,
   NODE_REGISTRY,
+  generateSlug,
+  validateSlug,
+  collectWarnings,
 } from '../model/index.js';
 import { projectStorage } from '../storage/index.js';
 
 const EditorContext = createContext(null);
+
+const GROUPING_WINDOW_MS = 600;
+const MAX_HISTORY = 50;
 
 function parseTranslate(transformStr) {
   if (!transformStr || typeof transformStr !== 'string') return { x: 0, y: 0 };
@@ -51,9 +63,24 @@ export function EditorProvider({ initialProject, onToast, children }) {
   // Current document model
   const [project, setProject] = useState(initialProject);
 
+  // Active page state
+  const [activePageId, setActivePageIdState] = useState(() => {
+    return (
+      initialProject?.pages?.find((p) => p.isHome)?.id ||
+      initialProject?.pages?.[0]?.id ||
+      null
+    );
+  });
+
+  // Active breakpoint state ('desktop' | 'tablet' | 'mobile')
+  const [activeBreakpoint, setActiveBreakpoint] = useState('desktop');
+
   // Ephemeral editor state
   const [selectedNodeId, setSelectedNodeIdState] = useState(() => {
-    return initialProject?.pages?.[0]?.root?.id || null;
+    const page =
+      initialProject?.pages?.find((p) => p.isHome) ||
+      initialProject?.pages?.[0];
+    return page?.root?.id || null;
   });
   const [hoveredNodeId, setHoveredNodeId] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -67,10 +94,33 @@ export function EditorProvider({ initialProject, onToast, children }) {
   const lastGroupActionRef = useRef({ key: null, time: 0 });
   const saveTimeoutRef = useRef(null);
 
-  // Active home page helper
+  // Asset Blob Object URL map cache (assetId -> blobUrl)
+  const assetBlobUrlsRef = useRef(new Map());
+  const [, setAssetUrlTrigger] = useState(0);
+
+  // Clean up Blob URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    const cache = assetBlobUrlsRef.current;
+    return () => {
+      for (const url of cache.values()) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      }
+      cache.clear();
+    };
+  }, []);
+
+  // Active page derived memo
   const activePage = useMemo(() => {
-    return project?.pages?.find((p) => p.isHome) || project?.pages?.[0] || null;
-  }, [project]);
+    if (!project?.pages || project.pages.length === 0) return null;
+    return (
+      project.pages.find((p) => p.id === activePageId) ||
+      project.pages.find((p) => p.isHome) ||
+      project.pages[0] ||
+      null
+    );
+  }, [project, activePageId]);
 
   // Selected node helper
   const selectedNode = useMemo(() => {
@@ -78,7 +128,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
     return findNode(activePage.root, selectedNodeId);
   }, [activePage, selectedNodeId]);
 
-  // Keep selection valid whenever activePage changes
   const setSelectedNodeId = useCallback((id) => {
     setSelectedNodeIdState(id);
   }, []);
@@ -97,10 +146,8 @@ export function EditorProvider({ initialProject, onToast, children }) {
           now - lastGroupActionRef.current.time < GROUPING_WINDOW_MS;
 
         if (isGrouped) {
-          // Do not push a new entry to past; update in place
           lastGroupActionRef.current = { key: groupKey, time: now };
         } else {
-          // Push current state to past
           setPast((prev) => {
             const nextPast = [...prev, currentProject];
             if (nextPast.length > MAX_HISTORY) {
@@ -111,7 +158,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
           lastGroupActionRef.current = { key: groupKey, time: now };
         }
 
-        // New edit clears future redo stack
         setFuture([]);
         setDirty(true);
         setSaveStatus('saving');
@@ -161,10 +207,11 @@ export function EditorProvider({ initialProject, onToast, children }) {
   }, [dirty]);
 
   /**
-   * Updates the home page root node immutably and commits to document.
+   * Updates the active page root node immutably and commits to document.
    */
   const setPageRoot = useCallback(
     (newRoot, groupKey = null) => {
+      if (!activePage) return;
       const updatedPages = project.pages.map((p) => {
         if (p.id === activePage.id) {
           return { ...p, root: newRoot };
@@ -187,12 +234,415 @@ export function EditorProvider({ initialProject, onToast, children }) {
   );
 
   // =========================================================================
+  // PAGE MANAGEMENT COMMANDS
+  // =========================================================================
+
+  /**
+   * Switches the active page view and safely resets selection to its root node.
+   */
+  const setActivePage = useCallback(
+    (pageId) => {
+      const targetPage = project?.pages?.find((p) => p.id === pageId);
+      if (!targetPage) return;
+      setActivePageIdState(pageId);
+      setSelectedNodeIdState(targetPage.root?.id || null);
+    },
+    [project]
+  );
+
+  /**
+   * Helper to ensure unique path slug among project pages
+   */
+  const getUniquePath = useCallback(
+    (baseSlug, excludePageId = null) => {
+      const existingPaths = new Set(
+        (project?.pages || [])
+          .filter((p) => p.id !== excludePageId)
+          .map((p) => p.path)
+      );
+
+      let candidate = baseSlug.startsWith('/') ? baseSlug : `/${baseSlug}`;
+      if (!existingPaths.has(candidate)) return candidate;
+
+      let counter = 2;
+      while (existingPaths.has(`${candidate}-${counter}`)) {
+        counter++;
+      }
+      return `${candidate}-${counter}`;
+    },
+    [project]
+  );
+
+  /**
+   * Command: createPage
+   */
+  const createPage = useCallback(
+    (name, customPath = null) => {
+      const pageName = (name || '').trim() || 'Untitled Page';
+      const rawSlug = customPath || generateSlug(pageName);
+      const uniquePath = getUniquePath(rawSlug);
+
+      const pathValidation = validateSlug(uniquePath, false);
+      if (!pathValidation.valid) {
+        if (onToast) onToast(pathValidation.error, 'error');
+        return { ok: false, error: pathValidation.error };
+      }
+
+      const newPageId = generateId('page');
+      const newPage = {
+        id: newPageId,
+        name: pageName,
+        path: uniquePath,
+        isHome: false,
+        title: pageName,
+        metaDescription: '',
+        root: createNode('Page', { name: `${pageName} Root` }),
+      };
+
+      const updatedProject = {
+        ...project,
+        project: {
+          ...project.project,
+          updatedAt: new Date().toISOString(),
+        },
+        pages: [...(project.pages || []), newPage],
+      };
+
+      commitDocument(updatedProject);
+      setActivePageIdState(newPageId);
+      setSelectedNodeIdState(newPage.root.id);
+
+      if (onToast) onToast(`Page "${pageName}" created.`, 'success');
+      return { ok: true, page: newPage };
+    },
+    [project, commitDocument, getUniquePath, onToast]
+  );
+
+  /**
+   * Command: renamePage
+   */
+  const renamePage = useCallback(
+    (pageId, newName) => {
+      const trimmed = (newName || '').trim();
+      if (!trimmed) return { ok: false, error: 'Page name cannot be empty.' };
+
+      const updatedPages = project.pages.map((p) => {
+        if (p.id === pageId) {
+          return { ...p, name: trimmed };
+        }
+        return p;
+      });
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        pages: updatedPages,
+      };
+
+      commitDocument(updatedProject);
+      return { ok: true };
+    },
+    [project, commitDocument]
+  );
+
+  /**
+   * Command: updatePageSettings
+   */
+  const updatePageSettings = useCallback(
+    (pageId, settings) => {
+      const targetPage = project?.pages?.find((p) => p.id === pageId);
+      if (!targetPage) return { ok: false, error: 'Page not found.' };
+
+      let nextPath = settings.path !== undefined ? settings.path : targetPage.path;
+
+      if (targetPage.isHome) {
+        nextPath = '/';
+      } else if (settings.path !== undefined) {
+        const pathValidation = validateSlug(nextPath, false);
+        if (!pathValidation.valid) {
+          if (onToast) onToast(pathValidation.error, 'error');
+          return { ok: false, error: pathValidation.error };
+        }
+
+        // Check path uniqueness
+        const collision = project.pages.find(
+          (p) => p.id !== pageId && p.path === nextPath
+        );
+        if (collision) {
+          const err = `URL path "${nextPath}" is already used by "${collision.name}".`;
+          if (onToast) onToast(err, 'error');
+          return { ok: false, error: err };
+        }
+      }
+
+      const updatedPages = project.pages.map((p) => {
+        if (p.id === pageId) {
+          return {
+            ...p,
+            name: settings.name !== undefined ? settings.name.trim() : p.name,
+            path: nextPath,
+            title: settings.title !== undefined ? settings.title : p.title,
+            metaDescription:
+              settings.metaDescription !== undefined
+                ? settings.metaDescription
+                : p.metaDescription,
+          };
+        }
+        return p;
+      });
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        pages: updatedPages,
+      };
+
+      commitDocument(updatedProject);
+      if (onToast) onToast('Page settings updated.', 'success');
+      return { ok: true };
+    },
+    [project, commitDocument, onToast]
+  );
+
+  /**
+   * Command: duplicatePage (deep clones entire tree with all-new IDs)
+   */
+  const duplicatePage = useCallback(
+    (pageId) => {
+      const pageToDup = project?.pages?.find((p) => p.id === pageId);
+      if (!pageToDup) return { ok: false, error: 'Page not found.' };
+
+      const clonedRoot = cloneNode(pageToDup.root);
+      const newPageId = generateId('page');
+      const baseName = `${pageToDup.name} (Copy)`;
+      const newPath = getUniquePath(`${pageToDup.path}-copy`);
+
+      const newPage = {
+        id: newPageId,
+        name: baseName,
+        path: newPath,
+        isHome: false,
+        title: pageToDup.title ? `${pageToDup.title} (Copy)` : baseName,
+        metaDescription: pageToDup.metaDescription || '',
+        root: clonedRoot,
+      };
+
+      const sourceIndex = project.pages.findIndex((p) => p.id === pageId);
+      const nextPages = [...project.pages];
+      nextPages.splice(sourceIndex + 1, 0, newPage);
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        pages: nextPages,
+      };
+
+      commitDocument(updatedProject);
+      setActivePageIdState(newPageId);
+      setSelectedNodeIdState(clonedRoot.id);
+
+      if (onToast) onToast(`Duplicated "${pageToDup.name}".`, 'success');
+      return { ok: true, page: newPage };
+    },
+    [project, commitDocument, getUniquePath, onToast]
+  );
+
+  /**
+   * Query: find all nodes across all pages that link to pageId
+   */
+  const getLinkedNodesForPage = useCallback(
+    (targetPageId) => {
+      const matches = [];
+      if (!project?.pages) return matches;
+
+      const scan = (node, pId, pName) => {
+        if (!node) return;
+        if (
+          node.props?.linkTarget &&
+          node.props.linkTarget.type === 'page' &&
+          node.props.linkTarget.pageId === targetPageId
+        ) {
+          matches.push({
+            pageId: pId,
+            pageName: pName,
+            nodeId: node.id,
+            nodeName: node.name || node.type,
+            nodeType: node.type,
+          });
+        }
+        if (Array.isArray(node.children)) {
+          for (const child of node.children) scan(child, pId, pName);
+        }
+      };
+
+      for (const p of project.pages) {
+        if (p.root) scan(p.root, p.id, p.name);
+      }
+      return matches;
+    },
+    [project]
+  );
+
+  /**
+   * Command: deletePage
+   */
+  const deletePage = useCallback(
+    (pageId) => {
+      if (!project?.pages || project.pages.length <= 1) {
+        const msg = 'The last remaining page cannot be deleted.';
+        if (onToast) onToast(msg, 'error');
+        return { ok: false, error: msg };
+      }
+
+      const pageToDelete = project.pages.find((p) => p.id === pageId);
+      if (!pageToDelete) return { ok: false, error: 'Page not found.' };
+
+      if (pageToDelete.isHome) {
+        const msg = 'The home page cannot be deleted until another page is set as home.';
+        if (onToast) onToast(msg, 'error');
+        return { ok: false, error: msg };
+      }
+
+      // Clean up internal links targeting this deleted page across all remaining pages
+      const cleanLinksInTree = (node) => {
+        if (!node) return node;
+        let updatedProps = node.props;
+        if (
+          node.props?.linkTarget &&
+          node.props.linkTarget.type === 'page' &&
+          node.props.linkTarget.pageId === pageId
+        ) {
+          updatedProps = {
+            ...node.props,
+            linkTarget: { type: 'none' },
+          };
+        }
+        const updatedChildren = Array.isArray(node.children)
+          ? node.children.map(cleanLinksInTree)
+          : [];
+        return {
+          ...node,
+          props: updatedProps,
+          children: updatedChildren,
+        };
+      };
+
+      const nextPages = project.pages
+        .filter((p) => p.id !== pageId)
+        .map((p) => ({
+          ...p,
+          root: cleanLinksInTree(p.root),
+        }));
+
+      // If active page was deleted, switch to home page
+      const nextActivePage =
+        nextPages.find((p) => p.isHome) || nextPages[0];
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        pages: nextPages,
+      };
+
+      commitDocument(updatedProject);
+      if (activePageId === pageId) {
+        setActivePageIdState(nextActivePage.id);
+        setSelectedNodeIdState(nextActivePage.root?.id || null);
+      }
+
+      if (onToast) onToast(`Page "${pageToDelete.name}" deleted.`, 'info');
+      return { ok: true };
+    },
+    [project, activePageId, commitDocument, onToast]
+  );
+
+  /**
+   * Command: setHomePage
+   */
+  const setHomePage = useCallback(
+    (pageId) => {
+      const targetPage = project?.pages?.find((p) => p.id === pageId);
+      if (!targetPage) return { ok: false, error: 'Page not found.' };
+      if (targetPage.isHome) return { ok: true };
+
+      const prevHome = project.pages.find((p) => p.isHome);
+      const updatedPages = project.pages.map((p) => {
+        if (p.id === pageId) {
+          return { ...p, isHome: true, path: '/' };
+        }
+        if (p.isHome) {
+          // Reassign previous home a unique slug based on its name
+          const slug = getUniquePath(generateSlug(p.name || 'home'), pageId);
+          return { ...p, isHome: false, path: slug };
+        }
+        return p;
+      });
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        pages: updatedPages,
+      };
+
+      commitDocument(updatedProject);
+      if (onToast) onToast(`"${targetPage.name}" set as home page.`, 'success');
+      return { ok: true };
+    },
+    [project, commitDocument, getUniquePath, onToast]
+  );
+
+  /**
+   * Command: reorderPages
+   */
+  const reorderPages = useCallback(
+    (fromIndex, toIndex) => {
+      if (
+        fromIndex < 0 ||
+        fromIndex >= project.pages.length ||
+        toIndex < 0 ||
+        toIndex >= project.pages.length
+      ) {
+        return;
+      }
+      const nextPages = [...project.pages];
+      const [moved] = nextPages.splice(fromIndex, 1);
+      nextPages.splice(toIndex, 0, moved);
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        pages: nextPages,
+      };
+
+      commitDocument(updatedProject);
+    },
+    [project, commitDocument]
+  );
+
+  const movePageUp = useCallback(
+    (pageId) => {
+      const idx = project.pages.findIndex((p) => p.id === pageId);
+      if (idx > 0) reorderPages(idx, idx - 1);
+    },
+    [project, reorderPages]
+  );
+
+  const movePageDown = useCallback(
+    (pageId) => {
+      const idx = project.pages.findIndex((p) => p.id === pageId);
+      if (idx !== -1 && idx < project.pages.length - 1) {
+        reorderPages(idx, idx + 1);
+      }
+    },
+    [project, reorderPages]
+  );
+
+  // =========================================================================
   // TYPED EDITOR COMMANDS
   // =========================================================================
 
   /**
    * Command: addNode
-   * Inserts a new component node into targetParentId, or the currently selected container.
    */
   const addNode = useCallback(
     (type, targetParentId = null, index = -1) => {
@@ -203,7 +653,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
       let parentId = targetParentId;
       let finalIndex = index;
 
-      // Helper to find any container in the active tree that can accept `type`
       const findFirstValidContainer = (node) => {
         if (!node) return null;
         if (canNest(node.type, type)) return node.id;
@@ -216,13 +665,11 @@ export function EditorProvider({ initialProject, onToast, children }) {
         return null;
       };
 
-      // 1. If no parent specified, resolve based on current selection
       if (!parentId) {
         if (selectedNode) {
           if (canNest(selectedNode.type, type)) {
             parentId = selectedNode.id;
           } else {
-            // Find parent of selected node
             const loc = findParent(activePage.root, selectedNode.id);
             if (loc && canNest(loc.parent.type, type)) {
               parentId = loc.parent.id;
@@ -231,18 +678,15 @@ export function EditorProvider({ initialProject, onToast, children }) {
           }
         }
 
-        // 2. Fallback to page root if allowed
         if (!parentId && canNest(activePage.root.type, type)) {
           parentId = activePage.root.id;
         }
 
-        // 3. Fallback: Search the active page for the first container that can nest this component
         if (!parentId) {
           parentId = findFirstValidContainer(activePage.root);
         }
       }
 
-      // 4. If root is Page and has no valid container yet, auto-create Section + Container to center component
       if (!parentId && activePage.root.type === 'Page') {
         const autoSection = createNode('Section', { name: 'New Section' });
         const autoContainer = createNode('Container', { name: 'Main Container' });
@@ -251,12 +695,15 @@ export function EditorProvider({ initialProject, onToast, children }) {
           : ['Button', 'Image'].includes(type)
             ? { margin: '0 auto' }
             : {};
-
         const newNode = createNode(type, { styles: centerStyles });
-        autoContainer.children = [newNode];
-        autoSection.children = [autoContainer];
+        autoContainer.children.push(newNode);
+        autoSection.children.push(autoContainer);
 
-        const newRoot = insertNode(activePage.root, activePage.root.id, autoSection, -1);
+        const newRoot = {
+          ...activePage.root,
+          children: [...(activePage.root.children || []), autoSection],
+        };
+
         setPageRoot(newRoot);
         setSelectedNodeId(newNode.id);
 
@@ -265,7 +712,7 @@ export function EditorProvider({ initialProject, onToast, children }) {
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 80);
 
-        if (onToast) onToast(`Added ${NODE_REGISTRY[type]?.label || type} (centered)`, 'success');
+        if (onToast) onToast(`Added ${NODE_REGISTRY[type]?.label || type}`, 'success');
         return { ok: true, node: newNode };
       }
 
@@ -286,7 +733,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
         return { ok: false, error: msg };
       }
 
-      // Centered styling for newly created component
       const centerStyles = ['Heading', 'Text'].includes(type)
         ? { textAlign: 'center', margin: '0 auto' }
         : ['Button', 'Image'].includes(type)
@@ -312,7 +758,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
 
   /**
    * Command: removeNode
-   * Removes targetId. Page root is strictly protected.
    */
   const removeNodeCmd = useCallback(
     (targetId) => {
@@ -332,7 +777,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
       const newRoot = removeNode(activePage.root, targetId);
       setPageRoot(newRoot);
 
-      // If deleted node was selected, select parent
       if (selectedNodeId === targetId) {
         setSelectedNodeId(loc.parent.id);
       }
@@ -345,7 +789,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
 
   /**
    * Command: duplicateNode
-   * Duplicates targetId with new IDs and inserts right below original.
    */
   const duplicateNodeCmd = useCallback(
     (targetId) => {
@@ -373,7 +816,6 @@ export function EditorProvider({ initialProject, onToast, children }) {
 
   /**
    * Command: moveNode
-   * Re-parents or reorders targetId into newParentId at newIndex.
    */
   const moveNodeCmd = useCallback(
     (targetId, newParentId, newIndex = -1) => {
@@ -409,15 +851,11 @@ export function EditorProvider({ initialProject, onToast, children }) {
     [activePage, setPageRoot, setSelectedNodeId, onToast]
   );
 
-  /**
-   * Command: moveUp
-   */
   const moveUpCmd = useCallback(
     (targetId) => {
       if (!activePage?.root || targetId === activePage.root.id) {
         return { ok: false, error: 'Cannot move root.' };
       }
-
       const newRoot = modelMoveUp(activePage.root, targetId);
       if (newRoot !== activePage.root) {
         setPageRoot(newRoot);
@@ -428,15 +866,11 @@ export function EditorProvider({ initialProject, onToast, children }) {
     [activePage, setPageRoot]
   );
 
-  /**
-   * Command: moveDown
-   */
   const moveDownCmd = useCallback(
     (targetId) => {
       if (!activePage?.root || targetId === activePage.root.id) {
         return { ok: false, error: 'Cannot move root.' };
       }
-
       const newRoot = modelMoveDown(activePage.root, targetId);
       if (newRoot !== activePage.root) {
         setPageRoot(newRoot);
@@ -449,13 +883,12 @@ export function EditorProvider({ initialProject, onToast, children }) {
 
   /**
    * Command: updateProps
-   * Validates URLs and applies partial prop updates immutably.
    */
   const updatePropsCmd = useCallback(
     (targetId, propUpdates, debounceHistory = false) => {
       if (!activePage?.root) return { ok: false, error: 'No active page.' };
 
-      // Validate URLs
+      // Validate legacy URL strings if any
       for (const [k, v] of Object.entries(propUpdates)) {
         if (['href', 'src', 'action', 'url'].includes(k.toLowerCase()) && typeof v === 'string') {
           if (!isSafeUrl(v)) {
@@ -476,23 +909,135 @@ export function EditorProvider({ initialProject, onToast, children }) {
 
   /**
    * Command: updateStyles
-   * Applies partial inline styles immutably.
+   * In desktop mode: writes to base `styles`.
+   * In tablet or mobile mode: writes ONLY to `responsiveStyles[activeBreakpoint]`.
    */
   const updateStylesCmd = useCallback(
     (targetId, styleUpdates, debounceHistory = false) => {
       if (!activePage?.root) return { ok: false, error: 'No active page.' };
 
-      const newRoot = updateNode(activePage.root, targetId, { styles: styleUpdates });
-      const groupKey = debounceHistory ? `style_${targetId}` : null;
+      const targetNode = findNode(activePage.root, targetId);
+      if (!targetNode) return { ok: false, error: 'Node not found.' };
+
+      let newRoot;
+      if (activeBreakpoint === 'desktop') {
+        newRoot = updateNode(activePage.root, targetId, { styles: styleUpdates });
+      } else {
+        const currentResp = targetNode.responsiveStyles || { tablet: {}, mobile: {} };
+        const bpOverrides = { ...(currentResp[activeBreakpoint] || {}), ...styleUpdates };
+        // Clean undefined or empty string values
+        for (const [k, v] of Object.entries(bpOverrides)) {
+          if (v === '' || v === undefined) delete bpOverrides[k];
+        }
+        const updatedResp = {
+          ...currentResp,
+          [activeBreakpoint]: bpOverrides,
+        };
+        newRoot = updateNode(activePage.root, targetId, { responsiveStyles: updatedResp });
+      }
+
+      const groupKey = debounceHistory ? `style_${targetId}_${activeBreakpoint}` : null;
       setPageRoot(newRoot, groupKey);
       return { ok: true };
     },
-    [activePage, setPageRoot]
+    [activePage, activeBreakpoint, setPageRoot]
   );
 
   /**
-   * Command: renameNode
+   * Command: resetStyleOverride
+   * Removes a specific style key from a breakpoint's override.
    */
+  const resetStyleOverrideCmd = useCallback(
+    (targetId, styleKey, breakpoint = activeBreakpoint) => {
+      if (!activePage?.root || breakpoint === 'desktop') return { ok: true };
+
+      const targetNode = findNode(activePage.root, targetId);
+      if (!targetNode) return { ok: false, error: 'Node not found.' };
+
+      const currentResp = targetNode.responsiveStyles || { tablet: {}, mobile: {} };
+      const bpOverrides = { ...(currentResp[breakpoint] || {}) };
+      delete bpOverrides[styleKey];
+
+      const updatedResp = {
+        ...currentResp,
+        [breakpoint]: bpOverrides,
+      };
+
+      const newRoot = updateNode(activePage.root, targetId, { responsiveStyles: updatedResp });
+      setPageRoot(newRoot);
+      return { ok: true };
+    },
+    [activePage, activeBreakpoint, setPageRoot]
+  );
+
+  /**
+   * Command: setResponsiveVisibility
+   * Toggles hidden (display: none) override on a breakpoint.
+   */
+  const setResponsiveVisibilityCmd = useCallback(
+    (targetId, breakpoint = activeBreakpoint, isHidden = true) => {
+      if (!activePage?.root) return { ok: false, error: 'No active page.' };
+
+      if (breakpoint === 'desktop') {
+        const styleUpdate = { display: isHidden ? 'none' : '' };
+        return updateStylesCmd(targetId, styleUpdate);
+      }
+
+      const targetNode = findNode(activePage.root, targetId);
+      if (!targetNode) return { ok: false, error: 'Node not found.' };
+
+      const currentResp = targetNode.responsiveStyles || { tablet: {}, mobile: {} };
+      const bpOverrides = { ...(currentResp[breakpoint] || {}) };
+      if (isHidden) {
+        bpOverrides.display = 'none';
+      } else {
+        delete bpOverrides.display;
+      }
+
+      const updatedResp = {
+        ...currentResp,
+        [breakpoint]: bpOverrides,
+      };
+
+      const newRoot = updateNode(activePage.root, targetId, { responsiveStyles: updatedResp });
+      setPageRoot(newRoot);
+      return { ok: true };
+    },
+    [activePage, activeBreakpoint, updateStylesCmd, setPageRoot]
+  );
+
+  /**
+   * Command: stackOnMobile
+   * Inspector shortcut: sets mobile flexDirection to column (or grid columns to 1).
+   */
+  const stackOnMobileCmd = useCallback(
+    (targetId) => {
+      if (!activePage?.root) return { ok: false, error: 'No active page.' };
+      const targetNode = findNode(activePage.root, targetId);
+      if (!targetNode) return { ok: false, error: 'Node not found.' };
+
+      const currentResp = targetNode.responsiveStyles || { tablet: {}, mobile: {} };
+      const mobileOverrides = { ...(currentResp.mobile || {}) };
+
+      if (targetNode.type === 'Grid') {
+        mobileOverrides.gridTemplateColumns = '1fr';
+      } else {
+        mobileOverrides.flexDirection = 'column';
+      }
+
+      const updatedResp = {
+        ...currentResp,
+        mobile: mobileOverrides,
+      };
+
+      const newRoot = updateNode(activePage.root, targetId, { responsiveStyles: updatedResp });
+      setPageRoot(newRoot);
+      if (onToast) onToast('Mobile stack layout applied.', 'success');
+      return { ok: true };
+    },
+    [activePage, setPageRoot, onToast]
+  );
+
   const renameNodeCmd = useCallback(
     (targetId, newName) => {
       if (!activePage?.root) return { ok: false, error: 'No active page.' };
@@ -503,15 +1048,10 @@ export function EditorProvider({ initialProject, onToast, children }) {
     [activePage, setPageRoot]
   );
 
-  /**
-   * Command: updateNodeData
-   * Updates props, styles, and/or name atomically in a single operation/history step.
-   */
   const updateNodeDataCmd = useCallback(
     (targetId, dataUpdates, debounceHistory = false) => {
       if (!activePage?.root) return { ok: false, error: 'No active page.' };
 
-      // Validate URLs in props if any
       if (dataUpdates?.props) {
         for (const [k, v] of Object.entries(dataUpdates.props)) {
           if (['href', 'src', 'action', 'url'].includes(k.toLowerCase()) && typeof v === 'string') {
@@ -533,6 +1073,151 @@ export function EditorProvider({ initialProject, onToast, children }) {
   );
 
   // =========================================================================
+  // ASSET MANAGEMENT OPERATIONS
+  // =========================================================================
+
+  /**
+   * Resolves a Blob URL for an assetId (cached in memory and revoked on cleanup)
+   */
+  const getAssetBlobUrl = useCallback(
+    (assetId) => {
+      if (!assetId) return null;
+      if (assetBlobUrlsRef.current.has(assetId)) {
+        return assetBlobUrlsRef.current.get(assetId);
+      }
+      // Async load from IndexedDB
+      projectStorage
+        .getAssetBlob(assetId)
+        .then((blob) => {
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            assetBlobUrlsRef.current.set(assetId, url);
+            setAssetUrlTrigger((v) => v + 1);
+          }
+        })
+        .catch(() => {});
+      return null;
+    },
+    []
+  );
+
+  /**
+   * Uploads an asset file to IndexedDB and records asset metadata in project.assets
+   */
+  const uploadAsset = useCallback(
+    async (file) => {
+      const pId = project?.project?.id || project?.id || 'default_project';
+      const oId = project?.project?.ownerId || project?.ownerId || 'local_user';
+
+      try {
+        const savedMeta = await projectStorage.saveAsset(pId, oId, file);
+        // Cache blob URL immediately
+        const blobUrl = URL.createObjectURL(file);
+        assetBlobUrlsRef.current.set(savedMeta.id, blobUrl);
+
+        const currentAssets = project.assets || [];
+        const nextAssets = [...currentAssets, savedMeta];
+
+        const updatedProject = {
+          ...project,
+          project: { ...project.project, updatedAt: new Date().toISOString() },
+          assets: nextAssets,
+        };
+
+        commitDocument(updatedProject);
+        if (onToast) onToast(`Asset "${savedMeta.filename}" uploaded.`, 'success');
+        return { ok: true, asset: savedMeta, blobUrl };
+      } catch (err) {
+        if (onToast) onToast(err.message || 'Asset upload failed.', 'error');
+        return { ok: false, error: err.message };
+      }
+    },
+    [project, commitDocument, onToast]
+  );
+
+  /**
+   * Deletes an asset record from project and removes blob from IndexedDB
+   */
+  const deleteAsset = useCallback(
+    async (assetId) => {
+      try {
+        await projectStorage.deleteAsset(assetId);
+        if (assetBlobUrlsRef.current.has(assetId)) {
+          try {
+            URL.revokeObjectURL(assetBlobUrlsRef.current.get(assetId));
+          } catch {}
+          assetBlobUrlsRef.current.delete(assetId);
+        }
+
+        const nextAssets = (project.assets || []).filter((a) => a.id !== assetId);
+        const updatedProject = {
+          ...project,
+          project: { ...project.project, updatedAt: new Date().toISOString() },
+          assets: nextAssets,
+        };
+
+        commitDocument(updatedProject);
+        if (onToast) onToast('Asset removed.', 'info');
+        return { ok: true };
+      } catch (err) {
+        if (onToast) onToast(err.message || 'Asset deletion failed.', 'error');
+        return { ok: false, error: err.message };
+      }
+    },
+    [project, commitDocument, onToast]
+  );
+
+  /**
+   * Updates asset metadata (e.g. filename, altText)
+   */
+  const updateAssetMeta = useCallback(
+    (assetId, metaUpdates) => {
+      const nextAssets = (project.assets || []).map((a) => {
+        if (a.id === assetId) {
+          return { ...a, ...metaUpdates };
+        }
+        return a;
+      });
+
+      const updatedProject = {
+        ...project,
+        project: { ...project.project, updatedAt: new Date().toISOString() },
+        assets: nextAssets,
+      };
+
+      commitDocument(updatedProject);
+      return { ok: true };
+    },
+    [project, commitDocument]
+  );
+
+  // =========================================================================
+  // HEALTH WARNINGS COMPUTATION
+  // =========================================================================
+
+  const warnings = useMemo(() => {
+    if (!project) return [];
+    return collectWarnings(project, activeBreakpoint);
+  }, [project, activeBreakpoint]);
+
+  const jumpToWarning = useCallback(
+    (warning) => {
+      if (!warning) return;
+      if (warning.pageId && warning.pageId !== activePage?.id) {
+        setActivePage(warning.pageId);
+      }
+      if (warning.nodeId) {
+        setSelectedNodeId(warning.nodeId);
+        setTimeout(() => {
+          const el = document.querySelector(`[data-node-id="${warning.nodeId}"]`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+      }
+    },
+    [activePage, setActivePage, setSelectedNodeId]
+  );
+
+  // =========================================================================
   // UNDO / REDO CONTROLS
   // =========================================================================
 
@@ -551,16 +1236,26 @@ export function EditorProvider({ initialProject, onToast, children }) {
     setDirty(true);
     setSaveStatus('saving');
 
-    // Re-verify selectedNode exists in previous document
-    const prevHome = previousProject?.pages?.find((p) => p.isHome) || previousProject?.pages?.[0];
-    if (prevHome && selectedNodeId) {
-      const exists = findNode(prevHome.root, selectedNodeId);
-      if (!exists) {
-        setSelectedNodeId(prevHome.root.id);
+    // Safely re-verify active page and selectedNode in restored document
+    const restoredPage =
+      previousProject.pages?.find((p) => p.id === activePageId) ||
+      previousProject.pages?.find((p) => p.isHome) ||
+      previousProject.pages?.[0];
+
+    if (restoredPage) {
+      if (restoredPage.id !== activePageId) {
+        setActivePageIdState(restoredPage.id);
+      }
+      if (selectedNodeId) {
+        const exists = findNode(restoredPage.root, selectedNodeId);
+        if (!exists) {
+          setSelectedNodeId(restoredPage.root?.id || null);
+        }
       }
     }
+
     if (onToast) onToast('Undo', 'info');
-  }, [past, future, project, selectedNodeId, setSelectedNodeId, onToast]);
+  }, [past, future, project, activePageId, selectedNodeId, setSelectedNodeId, onToast]);
 
   const redo = useCallback(() => {
     if (future.length === 0) return;
@@ -574,17 +1269,26 @@ export function EditorProvider({ initialProject, onToast, children }) {
     setDirty(true);
     setSaveStatus('saving');
 
-    const nextHome = nextProject?.pages?.find((p) => p.isHome) || nextProject?.pages?.[0];
-    if (nextHome && selectedNodeId) {
-      const exists = findNode(nextHome.root, selectedNodeId);
-      if (!exists) {
-        setSelectedNodeId(nextHome.root.id);
+    const restoredPage =
+      nextProject.pages?.find((p) => p.id === activePageId) ||
+      nextProject.pages?.find((p) => p.isHome) ||
+      nextProject.pages?.[0];
+
+    if (restoredPage) {
+      if (restoredPage.id !== activePageId) {
+        setActivePageIdState(restoredPage.id);
+      }
+      if (selectedNodeId) {
+        const exists = findNode(restoredPage.root, selectedNodeId);
+        if (!exists) {
+          setSelectedNodeId(restoredPage.root?.id || null);
+        }
       }
     }
-    if (onToast) onToast('Redo', 'info');
-  }, [past, future, project, selectedNodeId, setSelectedNodeId, onToast]);
 
-  // Explicit Save
+    if (onToast) onToast('Redo', 'info');
+  }, [past, future, project, activePageId, selectedNodeId, setSelectedNodeId, onToast]);
+
   const saveNow = useCallback(async () => {
     if (!project) return;
     setSaveStatus('saving');
@@ -600,12 +1304,11 @@ export function EditorProvider({ initialProject, onToast, children }) {
   }, [project, onToast]);
 
   // =========================================================================
-  // KEYBOARD SHORTCUTS LISTENER
+  // KEYBOARD SHORTCUTS
   // =========================================================================
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Do not intercept keystrokes if typing inside inputs/textareas/contenteditable
       const target = e.target;
       const isInput =
         target &&
@@ -627,7 +1330,10 @@ export function EditorProvider({ initialProject, onToast, children }) {
       }
 
       // Redo: Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y
-      if ((modKey && e.shiftKey && e.key.toLowerCase() === 'z') || (modKey && e.key.toLowerCase() === 'y')) {
+      if (
+        (modKey && e.shiftKey && e.key.toLowerCase() === 'z') ||
+        (modKey && e.key.toLowerCase() === 'y')
+      ) {
         e.preventDefault();
         redo();
         return;
@@ -665,8 +1371,12 @@ export function EditorProvider({ initialProject, onToast, children }) {
         return;
       }
 
-      // Nudge component with Arrow keys: ArrowUp, ArrowDown, ArrowLeft, ArrowRight
-      if (!e.altKey && !modKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      // Nudge component with Arrow keys
+      if (
+        !e.altKey &&
+        !modKey &&
+        ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+      ) {
         if (selectedNodeId && activePage?.root && selectedNodeId !== activePage.root.id) {
           e.preventDefault();
           const step = e.shiftKey ? 10 : 2;
@@ -711,6 +1421,7 @@ export function EditorProvider({ initialProject, onToast, children }) {
     removeNodeCmd,
     moveUpCmd,
     moveDownCmd,
+    updateStylesCmd,
     activePage,
     setSelectedNodeId,
   ]);
@@ -718,6 +1429,8 @@ export function EditorProvider({ initialProject, onToast, children }) {
   const value = {
     project,
     activePage,
+    activePageId,
+    activeBreakpoint,
     selectedNodeId,
     selectedNode,
     hoveredNodeId,
@@ -727,7 +1440,20 @@ export function EditorProvider({ initialProject, onToast, children }) {
     canRedo,
     setSelectedNodeId,
     setHoveredNodeId,
-    // Commands
+    setActivePage,
+    setActiveBreakpoint,
+    // Page Commands
+    createPage,
+    renamePage,
+    updatePageSettings,
+    duplicatePage,
+    deletePage,
+    setHomePage,
+    reorderPages,
+    movePageUp,
+    movePageDown,
+    getLinkedNodesForPage,
+    // Node Commands
     addNode,
     removeNode: removeNodeCmd,
     duplicateNode: duplicateNodeCmd,
@@ -736,8 +1462,19 @@ export function EditorProvider({ initialProject, onToast, children }) {
     moveDown: moveDownCmd,
     updateProps: updatePropsCmd,
     updateStyles: updateStylesCmd,
+    resetStyleOverride: resetStyleOverrideCmd,
+    setResponsiveVisibility: setResponsiveVisibilityCmd,
+    stackOnMobile: stackOnMobileCmd,
     updateNodeData: updateNodeDataCmd,
     renameNode: renameNodeCmd,
+    // Asset Management
+    uploadAsset,
+    deleteAsset,
+    updateAssetMeta,
+    getAssetBlobUrl,
+    // Warnings
+    warnings,
+    jumpToWarning,
     // History
     undo,
     redo,

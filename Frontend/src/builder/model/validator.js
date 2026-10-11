@@ -5,6 +5,8 @@
 
 import { SCHEMA_VERSION, NODE_TYPES } from './types.js';
 import { NODE_REGISTRY, canNest } from './registry.js';
+import { validateLinkTarget } from './links.js';
+import { validateSlug } from './slug.js';
 
 /**
  * Validates whether a URL or link string complies with security policies.
@@ -38,7 +40,7 @@ export function isSafeUrl(urlString) {
  * @param {string} nodeId
  * @param {string[]} errors
  */
-function validateStyles(styles, nodeId, errors) {
+export function validateStyles(styles, nodeId, errors) {
   if (!styles || typeof styles !== 'object' || Array.isArray(styles)) {
     errors.push(`Node "${nodeId}": "styles" must be a plain key-value object.`);
     return;
@@ -54,13 +56,44 @@ function validateStyles(styles, nodeId, errors) {
 }
 
 /**
- * Validates prop values (strings, numbers, booleans) and sanitizes URLs.
+ * Validates responsiveStyles overrides (must only target known breakpoints 'tablet' and 'mobile').
+ * @param {object} responsiveStyles
+ * @param {string} nodeId
+ * @param {string[]} errors
+ */
+export function validateResponsiveStyles(responsiveStyles, nodeId, errors) {
+  if (responsiveStyles === undefined || responsiveStyles === null) return;
+
+  if (typeof responsiveStyles !== 'object' || Array.isArray(responsiveStyles)) {
+    errors.push(`Node "${nodeId}": "responsiveStyles" must be a plain object.`);
+    return;
+  }
+
+  const allowedBreakpoints = ['tablet', 'mobile'];
+  for (const [bp, bpStyles] of Object.entries(responsiveStyles)) {
+    if (!allowedBreakpoints.includes(bp)) {
+      errors.push(
+        `Node "${nodeId}": invalid breakpoint override "${bp}". Allowed: ${allowedBreakpoints.join(', ')}.`
+      );
+      continue;
+    }
+
+    if (bpStyles && typeof bpStyles === 'object' && !Array.isArray(bpStyles)) {
+      validateStyles(bpStyles, `${nodeId} [${bp}]`, errors);
+    } else {
+      errors.push(`Node "${nodeId}": responsiveStyles for "${bp}" must be a plain key-value object.`);
+    }
+  }
+}
+
+/**
+ * Validates prop values (strings, numbers, booleans, or typed linkTarget objects) and sanitizes URLs.
  * @param {string} type
  * @param {object} props
  * @param {string} nodeId
  * @param {string[]} errors
  */
-function validateProps(type, props, nodeId, errors) {
+export function validateProps(type, props, nodeId, errors) {
   if (!props || typeof props !== 'object' || Array.isArray(props)) {
     errors.push(`Node "${nodeId}": "props" must be a plain key-value object.`);
     return;
@@ -70,6 +103,17 @@ function validateProps(type, props, nodeId, errors) {
   if (!def) return;
 
   for (const [key, val] of Object.entries(props)) {
+    // Typed linkTarget validation
+    if (key === 'linkTarget') {
+      if (val !== null && typeof val === 'object') {
+        const linkRes = validateLinkTarget(val);
+        if (!linkRes.ok) {
+          errors.push(`Node "${nodeId}": prop "linkTarget" is invalid: ${linkRes.error}`);
+        }
+        continue;
+      }
+    }
+
     const valType = typeof val;
     if (val !== null && valType !== 'string' && valType !== 'number' && valType !== 'boolean') {
       errors.push(`Node "${nodeId}": prop "${key}" must be a primitive value, received ${valType}.`);
@@ -99,8 +143,9 @@ function validateProps(type, props, nodeId, errors) {
  * @param {object|null} parent
  * @param {Set<string>} seenNodeIds
  * @param {string[]} errors
+ * @param {Set<string>} [knownAssetIds]
  */
-function validateNodeSubtree(node, parent, seenNodeIds, errors) {
+function validateNodeSubtree(node, parent, seenNodeIds, errors, knownAssetIds) {
   if (!node || typeof node !== 'object') {
     errors.push(`Invalid node encountered: expected object, got ${typeof node}.`);
     return;
@@ -142,23 +187,33 @@ function validateNodeSubtree(node, parent, seenNodeIds, errors) {
     errors.push(`Node "${nodeId}" (${type}) is a leaf component and cannot have children.`);
   }
 
-  // Props & styles validation
+  // Props, styles, and responsiveStyles validation
   validateProps(type, node.props, nodeId, errors);
   validateStyles(node.styles, nodeId, errors);
+  validateResponsiveStyles(node.responsiveStyles, nodeId, errors);
+
+  // Asset reference verification: Image node referencing assetId must exist in assets[]
+  if (type === 'Image' && node.props?.assetId && knownAssetIds) {
+    if (!knownAssetIds.has(node.props.assetId)) {
+      errors.push(
+        `Node "${nodeId}": references asset ID "${node.props.assetId}" which does not exist in project assets.`
+      );
+    }
+  }
 
   if (node.children) {
     if (!Array.isArray(node.children)) {
       errors.push(`Node "${nodeId}": "children" must be an array.`);
     } else {
       for (const child of node.children) {
-        validateNodeSubtree(child, node, seenNodeIds, errors);
+        validateNodeSubtree(child, node, seenNodeIds, errors, knownAssetIds);
       }
     }
   }
 }
 
 /**
- * Validates a project document model against all structural and security constraints.
+ * Validates a project document model against all structural, security, and schema constraints.
  * Never throws exceptions on malformed input; returns structured errors instead.
  * @param {any} input
  * @returns {{ ok: true, project: object } | { ok: false, errors: string[] }}
@@ -205,6 +260,35 @@ export function validateProject(input) {
     }
   }
 
+  // Assets array validation
+  const knownAssetIds = new Set();
+  if (input.assets !== undefined) {
+    if (!Array.isArray(input.assets)) {
+      errors.push('"assets" must be an array.');
+    } else {
+      for (let i = 0; i < input.assets.length; i++) {
+        const asset = input.assets[i];
+        if (!asset || typeof asset !== 'object') {
+          errors.push(`Asset at index ${i} must be an object.`);
+          continue;
+        }
+        if (!asset.id || typeof asset.id !== 'string') {
+          errors.push(`Asset at index ${i} must have a valid string "id".`);
+        } else if (knownAssetIds.has(asset.id)) {
+          errors.push(`Duplicate asset ID "${asset.id}".`);
+        } else {
+          knownAssetIds.add(asset.id);
+        }
+
+        if (asset.reference && typeof asset.reference === 'string') {
+          if (asset.reference.startsWith('data:')) {
+            errors.push(`Asset "${asset.id || i}": inline data URIs are not allowed in document model.`);
+          }
+        }
+      }
+    }
+  }
+
   // Pages array checks
   const pages = input.pages;
   if (!Array.isArray(pages) || pages.length === 0) {
@@ -235,15 +319,17 @@ export function validateProject(input) {
         errors.push(`Page "${pageId || i}": "name" must be a non-empty string.`);
       }
 
-      if (!page.path || typeof page.path !== 'string' || !page.path.startsWith('/')) {
-        errors.push(`Page "${pageId || i}": "path" must be a valid path starting with "/".`);
+      const isHome = Boolean(page.isHome);
+      const slugValidation = validateSlug(page.path, isHome);
+      if (!slugValidation.ok) {
+        errors.push(`Page "${pageId || i}": ${slugValidation.error}`);
       } else if (seenPaths.has(page.path)) {
         errors.push(`Duplicate page path "${page.path}" found.`);
       } else {
         seenPaths.add(page.path);
       }
 
-      if (page.isHome) {
+      if (isHome) {
         homePagesCount++;
       }
 
@@ -253,41 +339,12 @@ export function validateProject(input) {
       } else if (page.root.type !== 'Page') {
         errors.push(`Page "${pageId || i}": "root" node must have type "Page", got "${page.root.type}".`);
       } else {
-        validateNodeSubtree(page.root, null, seenNodeIds, errors);
+        validateNodeSubtree(page.root, null, seenNodeIds, errors, knownAssetIds);
       }
     }
 
     if (homePagesCount !== 1) {
       errors.push(`Project must contain exactly one home page (isHome: true). Found ${homePagesCount}.`);
-    }
-  }
-
-  // Assets array checks
-  if (input.assets !== undefined) {
-    if (!Array.isArray(input.assets)) {
-      errors.push('"assets" must be an array.');
-    } else {
-      const seenAssetIds = new Set();
-      for (let i = 0; i < input.assets.length; i++) {
-        const asset = input.assets[i];
-        if (!asset || typeof asset !== 'object') {
-          errors.push(`Asset at index ${i} must be an object.`);
-          continue;
-        }
-        if (!asset.id || typeof asset.id !== 'string') {
-          errors.push(`Asset at index ${i} must have a valid string "id".`);
-        } else if (seenAssetIds.has(asset.id)) {
-          errors.push(`Duplicate asset ID "${asset.id}".`);
-        } else {
-          seenAssetIds.add(asset.id);
-        }
-
-        if (asset.reference && typeof asset.reference === 'string') {
-          if (asset.reference.startsWith('data:')) {
-            errors.push(`Asset "${asset.id || i}": inline data URIs are not allowed in document model.`);
-          }
-        }
-      }
     }
   }
 
@@ -299,8 +356,49 @@ export function validateProject(input) {
 }
 
 /**
+ * Normalizes node tree recursively during migration.
+ */
+function normalizeSubtree(node) {
+  if (!node || typeof node !== 'object') return node;
+
+  const clone = { ...node };
+
+  // Ensure responsiveStyles exists
+  if (!clone.responsiveStyles || typeof clone.responsiveStyles !== 'object') {
+    clone.responsiveStyles = { tablet: {}, mobile: {} };
+  } else {
+    clone.responsiveStyles = {
+      tablet: clone.responsiveStyles.tablet || {},
+      mobile: clone.responsiveStyles.mobile || {},
+    };
+  }
+
+  // Migrate legacy href to typed linkTarget for Button and Link
+  if (['Button', 'Link'].includes(clone.type)) {
+    clone.props = clone.props || {};
+    if (!clone.props.linkTarget) {
+      const rawHref = clone.props.href;
+      if (typeof rawHref === 'string' && rawHref.trim() && rawHref !== '#') {
+        clone.props.linkTarget = {
+          type: 'external',
+          url: rawHref,
+          openInNewTab: clone.props.target === '_blank',
+        };
+      } else {
+        clone.props.linkTarget = { type: 'none' };
+      }
+    }
+  }
+
+  if (Array.isArray(clone.children)) {
+    clone.children = clone.children.map(normalizeSubtree);
+  }
+
+  return clone;
+}
+
+/**
  * Version migration registry.
- * Keyed by schemaVersion; each function upgrades to the subsequent version.
  */
 const MIGRATIONS = {
   1: (doc) => doc, // Version 1 is baseline; returns unchanged
@@ -308,7 +406,6 @@ const MIGRATIONS = {
 
 /**
  * Sequentially migrates a project document to the latest schemaVersion.
- * Structure allows adding future versions (e.g. v2, v3) without altering consumer code.
  * @param {any} input
  * @returns {object} Migrated document
  */
@@ -321,15 +418,13 @@ export function migrateProject(input) {
   const docVersion = currentDoc.schemaVersion;
 
   if (typeof docVersion !== 'number' || docVersion < 1) {
-    // Legacy or unversioned document fallback
     currentDoc.schemaVersion = 1;
   }
 
+  // Run migrators sequentially
   while (currentDoc.schemaVersion < SCHEMA_VERSION) {
     const migrator = MIGRATIONS[currentDoc.schemaVersion];
-    if (!migrator) {
-      break;
-    }
+    if (!migrator) break;
     currentDoc = migrator(currentDoc);
     currentDoc.schemaVersion += 1;
   }

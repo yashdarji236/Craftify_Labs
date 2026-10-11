@@ -1,6 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useEditorStore } from '../store/editorContext.jsx';
-import { isSafeUrl, NODE_REGISTRY, HEADING_LEVEL_DEFAULTS } from '../model/index.js';
+import {
+  isSafeUrl,
+  NODE_REGISTRY,
+  HEADING_LEVEL_DEFAULTS,
+  resolveStyles,
+  LINK_TYPES,
+  validateLinkTarget,
+  validateSlug,
+  generateSlug,
+} from '../model/index.js';
 import {
   Sliders,
   Type,
@@ -14,6 +23,15 @@ import {
   Sparkles,
   Move,
   RotateCcw,
+  Link as LinkIcon,
+  Image as ImageIcon,
+  ExternalLink,
+  Layers,
+  Eye,
+  EyeOff,
+  Columns,
+  Grid as GridIcon,
+  Check,
 } from 'lucide-react';
 import { parseTranslate } from './CanvasRenderer.jsx';
 
@@ -46,8 +64,193 @@ function getContrastRatio(colorHex, bgHex) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+/**
+ * Typed Link Target Control (Task 2)
+ */
+function LinkTargetControl({ linkTarget, onChange, pages = [] }) {
+  const currentTarget = linkTarget || { type: 'none' };
+  const currentType = currentTarget.type || 'none';
+
+  const [urlError, setUrlError] = useState(null);
+
+  const handleTypeChange = (newType) => {
+    const updated = { type: newType };
+    if (newType === 'page') {
+      updated.pageId = pages[0]?.id || '';
+    } else if (newType === 'external') {
+      updated.url = 'https://';
+      updated.newTab = true;
+    } else if (newType === 'anchor') {
+      updated.nodeId = '';
+    } else if (newType === 'email') {
+      updated.email = '';
+    } else if (newType === 'phone') {
+      updated.phone = '';
+    }
+    setUrlError(null);
+    onChange(updated);
+  };
+
+  const handleFieldChange = (key, val) => {
+    const next = { ...currentTarget, [key]: val };
+    const valRes = validateLinkTarget(next);
+    if (!valRes.valid) {
+      setUrlError(valRes.error);
+    } else {
+      setUrlError(null);
+    }
+    onChange(next);
+  };
+
+  const handleAddHttps = () => {
+    const raw = currentTarget.url || '';
+    const fixed = `https://${raw.replace(/^(?:https?:\/\/)?/, '')}`;
+    handleFieldChange('url', fixed);
+  };
+
+  return (
+    <div className="space-y-3 p-3 rounded-2xl bg-[#0e0e11] border border-white/10">
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+          <LinkIcon className="w-3 h-3 text-indigo-400" />
+          <span>Link Destination</span>
+        </label>
+        <span className="text-[10px] font-mono text-zinc-500 uppercase">
+          {currentType}
+        </span>
+      </div>
+
+      {/* Segmented Type Picker */}
+      <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-black/40 border border-white/5 text-[10px]">
+        {LINK_TYPES.map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => handleTypeChange(t)}
+            className={`py-1 rounded-lg font-medium capitalize transition-all cursor-pointer ${
+              currentType === t
+                ? 'bg-white text-black font-bold shadow-sm'
+                : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Target Type Specific Inputs */}
+      {currentType === 'page' && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-400">Target Page</label>
+          <select
+            value={currentTarget.pageId || ''}
+            onChange={(e) => handleFieldChange('pageId', e.target.value)}
+            className="w-full px-2.5 py-1.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs focus:outline-none"
+          >
+            {pages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.path}) {p.isHome ? '★ Home' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {currentType === 'external' && (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] text-zinc-400">External URL</label>
+              {currentTarget.url && !/^https?:\/\//i.test(currentTarget.url) && (
+                <button
+                  type="button"
+                  onClick={handleAddHttps}
+                  className="text-[9px] text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                >
+                  + Add https://
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              placeholder="https://example.com"
+              value={currentTarget.url || ''}
+              onChange={(e) => handleFieldChange('url', e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs font-mono focus:outline-none"
+            />
+            {urlError && (
+              <p className="text-[10px] text-rose-400 leading-tight">{urlError}</p>
+            )}
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer text-[11px] text-zinc-300 pt-1">
+            <input
+              type="checkbox"
+              checked={Boolean(currentTarget.newTab)}
+              onChange={(e) => handleFieldChange('newTab', e.target.checked)}
+              className="rounded accent-indigo-600 cursor-pointer"
+            />
+            <span>Open in new tab (rel="noopener noreferrer")</span>
+          </label>
+        </div>
+      )}
+
+      {currentType === 'anchor' && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-400">Anchor ID (#section)</label>
+          <input
+            type="text"
+            placeholder="#features or section-id"
+            value={currentTarget.nodeId || ''}
+            onChange={(e) => handleFieldChange('nodeId', e.target.value)}
+            className="w-full px-2.5 py-1.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs font-mono focus:outline-none"
+          />
+        </div>
+      )}
+
+      {currentType === 'email' && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-400">Email Address</label>
+          <input
+            type="email"
+            placeholder="contact@company.com"
+            value={currentTarget.email || ''}
+            onChange={(e) => handleFieldChange('email', e.target.value)}
+            className="w-full px-2.5 py-1.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs font-mono focus:outline-none"
+          />
+        </div>
+      )}
+
+      {currentType === 'phone' && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-400">Phone Number</label>
+          <input
+            type="tel"
+            placeholder="+1 555 123 4567"
+            value={currentTarget.phone || ''}
+            onChange={(e) => handleFieldChange('phone', e.target.value)}
+            className="w-full px-2.5 py-1.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs font-mono focus:outline-none"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PropertiesInspector() {
-  const { selectedNode, updateProps, updateStyles, updateNodeData, renameNode } = useEditorStore();
+  const {
+    selectedNode,
+    project,
+    activeBreakpoint,
+    updateProps,
+    updateStyles,
+    resetStyleOverride,
+    setResponsiveVisibility,
+    stackOnMobile,
+    updateNodeData,
+    renameNode,
+    updatePageSettings,
+  } = useEditorStore();
 
   const [urlErrors, setUrlErrors] = useState({});
 
@@ -63,11 +266,20 @@ export default function PropertiesInspector() {
     );
   }
 
-  const { id, type, props = {}, styles = {}, name } = selectedNode;
+  const { id, type, props = {}, styles = {}, name, responsiveStyles = {} } = selectedNode;
   const def = NODE_REGISTRY[type] || {};
 
+  // Resolved styles at active breakpoint
+  const effectiveStyles = resolveStyles(selectedNode, activeBreakpoint);
+  const isHiddenAtBreakpoint = effectiveStyles.display === 'none';
+
+  // Helper to check if a specific style key has an override at the active breakpoint
+  const isOverriddenAtBreakpoint = (key) => {
+    if (activeBreakpoint === 'desktop') return false;
+    return responsiveStyles[activeBreakpoint]?.[key] !== undefined;
+  };
+
   const handlePropChange = (key, value) => {
-    // Validate URLs inline
     if (['href', 'src', 'action', 'url'].includes(key.toLowerCase()) && typeof value === 'string') {
       if (value && !isSafeUrl(value)) {
         setUrlErrors((prev) => ({
@@ -102,11 +314,17 @@ export default function PropertiesInspector() {
     updateStyles(id, { [key]: value }, true);
   };
 
+  const handleResetOverride = (key) => {
+    resetStyleOverride(id, key, activeBreakpoint);
+  };
+
   // Contrast check
-  const textColor = styles.color || '#ffffff';
-  const bgColor = styles.backgroundColor || '#09090b';
+  const textColor = effectiveStyles.color || '#ffffff';
+  const bgColor = effectiveStyles.backgroundColor || '#09090b';
   const contrast = getContrastRatio(textColor, bgColor);
   const isLowContrast = contrast !== null && contrast < 4.5;
+
+  const uploadedAssets = project?.assets || [];
 
   return (
     <aside className="w-80 border-l border-white/10 bg-[#111114]/90 backdrop-blur-2xl flex flex-col shrink-0 z-20 select-none overflow-y-auto">
@@ -116,12 +334,17 @@ export default function PropertiesInspector() {
           <Sliders className="w-3.5 h-3.5 text-zinc-300" />
           <span>Properties</span>
         </div>
-        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-zinc-300">
-          {type}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-zinc-300">
+            {type}
+          </span>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 capitalize">
+            {activeBreakpoint}
+          </span>
+        </div>
       </div>
 
-      <div className="p-4 space-y-6 text-xs text-zinc-300">
+      <div className="p-4 space-y-5 text-xs text-zinc-300">
         {/* Layer Identification */}
         <div className="p-3 rounded-2xl bg-[#0e0e11] border border-white/10 space-y-2">
           <div className="flex items-center justify-between">
@@ -136,7 +359,50 @@ export default function PropertiesInspector() {
           />
         </div>
 
-        {/* 1. CONTENT CONTROLS (SCHEMA-DRIVEN) */}
+        {/* Responsive Mode Status Banner */}
+        {activeBreakpoint !== 'desktop' && (
+          <div className="p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-300 text-[11px] space-y-1">
+            <div className="flex items-center justify-between font-semibold">
+              <span className="capitalize">{activeBreakpoint} Override Mode</span>
+              <span className="text-[9px] font-mono text-indigo-400">Cascades from Base</span>
+            </div>
+            <p className="text-[10px] text-indigo-300/80">
+              Edits here write only to {activeBreakpoint} overrides. Desktop base styles remain untouched.
+            </p>
+          </div>
+        )}
+
+        {/* Responsive Visibility Toggle */}
+        {type !== 'Page' && (
+          <div className="p-3 rounded-2xl bg-[#0e0e11] border border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {isHiddenAtBreakpoint ? (
+                <EyeOff className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Eye className="w-4 h-4 text-zinc-400" />
+              )}
+              <div>
+                <span className="text-xs font-medium text-white block">Visibility on {activeBreakpoint}</span>
+                <span className="text-[10px] text-zinc-500">
+                  {isHiddenAtBreakpoint ? 'Hidden (display: none)' : 'Visible'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setResponsiveVisibility(id, activeBreakpoint, !isHiddenAtBreakpoint)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                isHiddenAtBreakpoint
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30'
+                  : 'bg-white/10 text-zinc-300 hover:text-white hover:bg-white/15'
+              }`}
+            >
+              {isHiddenAtBreakpoint ? 'Unhide' : 'Hide'}
+            </button>
+          </div>
+        )}
+
+        {/* 1. CONTENT CONTROLS */}
         <div className="space-y-3">
           <div className="flex items-center gap-1.5 font-semibold text-zinc-200 text-xs">
             <Type className="w-3.5 h-3.5 text-zinc-400" />
@@ -150,11 +416,11 @@ export default function PropertiesInspector() {
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] text-zinc-400 font-medium">Heading Level</label>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/10 text-zinc-200 font-bold">
-                    {(props.level || 'h2').toUpperCase()} &bull; {styles.fontSize || HEADING_LEVEL_DEFAULTS[(props.level || 'h2').toLowerCase()]?.fontSize || '32px'}
+                    {(props.level || 'h2').toUpperCase()} &bull;{' '}
+                    {effectiveStyles.fontSize || '32px'}
                   </span>
                 </div>
 
-                {/* Quick-Pick Pill Selector */}
                 <div className="grid grid-cols-6 gap-1 p-1 rounded-xl bg-[#0a0a0c] border border-white/10">
                   {['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((lvl) => {
                     const isCurrent = (props.level || 'h2').toLowerCase() === lvl;
@@ -162,9 +428,8 @@ export default function PropertiesInspector() {
                       <button
                         key={lvl}
                         type="button"
-                        id={`heading-level-pill-${lvl}`}
                         onClick={() => handleHeadingLevelChange(lvl)}
-                        className={`py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                           isCurrent
                             ? 'bg-white text-black shadow-md font-bold'
                             : 'text-zinc-400 hover:text-white hover:bg-white/10'
@@ -175,19 +440,6 @@ export default function PropertiesInspector() {
                     );
                   })}
                 </div>
-
-                <select
-                  value={(props.level || 'h2').toLowerCase()}
-                  onChange={(e) => handleHeadingLevelChange(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
-                >
-                  <option value="h1">H1 - Primary Page Title (44px)</option>
-                  <option value="h2">H2 - Major Section Heading (32px)</option>
-                  <option value="h3">H3 - Sub-section Heading (24px)</option>
-                  <option value="h4">H4 - Card Title (20px)</option>
-                  <option value="h5">H5 - Small Title (16px)</option>
-                  <option value="h6">H6 - Micro Title (13px)</option>
-                </select>
               </div>
 
               <div className="space-y-1">
@@ -228,31 +480,11 @@ export default function PropertiesInspector() {
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400">Link URL (href)</label>
-                <input
-                  type="text"
-                  value={props.href ?? ''}
-                  onChange={(e) => handlePropChange('href', e.target.value)}
-                  placeholder="https://... or #section"
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none font-mono"
-                />
-                {urlErrors.href && (
-                  <p className="text-[10px] text-rose-400 leading-tight">{urlErrors.href}</p>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400">Target Window</label>
-                <select
-                  value={props.target || '_self'}
-                  onChange={(e) => handlePropChange('target', e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
-                >
-                  <option value="_self">Same tab (_self)</option>
-                  <option value="_blank">New tab (_blank)</option>
-                </select>
-              </div>
+              <LinkTargetControl
+                linkTarget={props.linkTarget}
+                pages={project?.pages || []}
+                onChange={(target) => handlePropChange('linkTarget', target)}
+              />
             </div>
           )}
 
@@ -269,129 +501,225 @@ export default function PropertiesInspector() {
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400">Destination URL</label>
-                <input
-                  type="text"
-                  value={props.href ?? ''}
-                  onChange={(e) => handlePropChange('href', e.target.value)}
-                  placeholder="/about or https://..."
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none font-mono"
-                />
-                {urlErrors.href && (
-                  <p className="text-[10px] text-rose-400 leading-tight">{urlErrors.href}</p>
-                )}
-              </div>
+              <LinkTargetControl
+                linkTarget={props.linkTarget}
+                pages={project?.pages || []}
+                onChange={(target) => handlePropChange('linkTarget', target)}
+              />
             </div>
           )}
 
-          {/* Image Props */}
+          {/* Image Props & Asset Picker (Task 3) */}
           {type === 'Image' && (
             <div className="space-y-3">
+              {/* Asset Library Picker */}
               <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400">Image Source URL</label>
-                <input
-                  type="text"
-                  value={props.src ?? ''}
-                  onChange={(e) => handlePropChange('src', e.target.value)}
-                  placeholder="/img2.jpg or https://..."
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none font-mono"
-                />
-                {urlErrors.src && (
-                  <p className="text-[10px] text-rose-400 leading-tight">{urlErrors.src}</p>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400 flex items-center justify-between">
-                  <span>Alt Text (Accessibility)</span>
-                  {!props.alt && (
-                    <span className="text-[10px] text-amber-400 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" />
-                      Required for SEO
-                    </span>
-                  )}
-                </label>
-                <input
-                  type="text"
-                  value={props.alt ?? ''}
-                  onChange={(e) => handlePropChange('alt', e.target.value)}
-                  placeholder="Describe image content"
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Grid Props */}
-          {type === 'Grid' && (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400">Columns Count ({props.columns || 3})</label>
-                <input
-                  type="range"
-                  min={1}
-                  max={6}
-                  value={props.columns || 3}
-                  onChange={(e) => {
-                    const cols = parseInt(e.target.value, 10);
-                    handlePropChange('columns', cols);
-                    handleStyleChange(
-                      'gridTemplateColumns',
-                      `repeat(${cols}, minmax(0, 1fr))`
-                    );
-                  }}
-                  className="w-full accent-white"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-zinc-400">Grid Gap</label>
+                <label className="text-[11px] text-zinc-400 font-medium">Project Asset Image</label>
                 <select
-                  value={props.gap || '24px'}
+                  value={props.assetId || ''}
                   onChange={(e) => {
-                    handlePropChange('gap', e.target.value);
-                    handleStyleChange('gap', e.target.value);
+                    const chosenId = e.target.value;
+                    const chosenAsset = uploadedAssets.find((a) => a.id === chosenId);
+                    if (chosenAsset) {
+                      updateProps(id, {
+                        assetId: chosenId,
+                        alt: chosenAsset.altText || props.alt || '',
+                      });
+                    } else {
+                      updateProps(id, { assetId: undefined });
+                    }
                   }}
                   className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
                 >
-                  <option value="12px">Compact (12px)</option>
-                  <option value="16px">Standard (16px)</option>
-                  <option value="24px">Spacious (24px)</option>
-                  <option value="36px">Expansive (36px)</option>
+                  <option value="">-- Choose from Asset Library or use URL --</option>
+                  {uploadedAssets.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.filename} ({(a.size / 1024).toFixed(0)} KB)
+                    </option>
+                  ))}
                 </select>
               </div>
+
+              {/* External URL fallback input */}
+              {!props.assetId && (
+                <div className="space-y-1">
+                  <label className="text-[11px] text-zinc-400">External Image URL</label>
+                  <input
+                    type="text"
+                    value={props.src ?? ''}
+                    onChange={(e) => handlePropChange('src', e.target.value)}
+                    placeholder="https://..."
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none font-mono"
+                  />
+                  {urlErrors.src && (
+                    <p className="text-[10px] text-rose-400 leading-tight">{urlErrors.src}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Alt Text & Decorative image */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-zinc-400 font-medium">Alt Text (Accessibility)</label>
+                  {!props.alt && !props.isDecorative && (
+                    <span className="text-[10px] text-amber-400 flex items-center gap-1 font-mono">
+                      <AlertTriangle className="w-3 h-3" />
+                      Alt required
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  disabled={Boolean(props.isDecorative)}
+                  value={props.alt ?? ''}
+                  onChange={(e) => handlePropChange('alt', e.target.value)}
+                  placeholder={props.isDecorative ? 'Marked decorative (alt="")' : 'Describe image content'}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none disabled:opacity-50"
+                />
+
+                <label className="flex items-center gap-2 cursor-pointer text-[11px] text-zinc-300 pt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(props.isDecorative)}
+                    onChange={(e) => {
+                      const isDec = e.target.checked;
+                      handlePropChange('isDecorative', isDec);
+                      if (isDec) handlePropChange('alt', '');
+                    }}
+                    className="rounded accent-indigo-600 cursor-pointer"
+                  />
+                  <span>Decorative image (sets alt="" intentionally)</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Grid Layout Props */}
+          {type === 'Grid' && (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-zinc-400">
+                    Grid Columns ({effectiveStyles.gridTemplateColumns || `repeat(${props.columns || 3}, minmax(0, 1fr))`})
+                  </label>
+                  {isOverriddenAtBreakpoint('gridTemplateColumns') && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetOverride('gridTemplateColumns')}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset override
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {[1, 2, 3, 4].map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      onClick={() => {
+                        handlePropChange('columns', col);
+                        handleStyleChange('gridTemplateColumns', `repeat(${col}, minmax(0, 1fr))`);
+                      }}
+                      className={`py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                        effectiveStyles.gridTemplateColumns === `repeat(${col}, minmax(0, 1fr))` ||
+                        (!effectiveStyles.gridTemplateColumns && (props.columns || 3) === col)
+                          ? 'bg-white text-black font-bold'
+                          : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      {col} Col
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Stack on Mobile Button */}
+              <button
+                type="button"
+                onClick={() => stackOnMobile(id)}
+                className="w-full py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Columns className="w-3.5 h-3.5" />
+                <span>Stack on mobile (1 col override)</span>
+              </button>
             </div>
           )}
 
           {/* Container Layout Props */}
-          {type === 'Container' && (
-            <div className="space-y-1">
-              <label className="text-[11px] text-zinc-400">Container Layout</label>
-              <select
-                value={props.layout || 'flex-col'}
-                onChange={(e) => {
-                  const layout = e.target.value;
-                  handlePropChange('layout', layout);
-                  handleStyleChange(
-                    'flexDirection',
-                    layout === 'flex-row' ? 'row' : 'column'
-                  );
-                }}
-                className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
+          {(type === 'Container' || type === 'Section') && (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-zinc-400">Flex Direction</label>
+                  {isOverriddenAtBreakpoint('flexDirection') && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetOverride('flexDirection')}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset override
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={effectiveStyles.flexDirection || (props.layout === 'flex-row' ? 'row' : 'column')}
+                  onChange={(e) => handleStyleChange('flexDirection', e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
+                >
+                  <option value="column">Column (Vertical)</option>
+                  <option value="row">Row (Horizontal)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-zinc-400">Flex Wrap</label>
+                  {isOverriddenAtBreakpoint('flexWrap') && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetOverride('flexWrap')}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset override
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={effectiveStyles.flexWrap || 'nowrap'}
+                  onChange={(e) => handleStyleChange('flexWrap', e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0e0e11] border border-white/10 text-white text-xs focus:outline-none"
+                >
+                  <option value="nowrap">No Wrap (single line)</option>
+                  <option value="wrap">Wrap (wrap to next line)</option>
+                </select>
+              </div>
+
+              {/* Stack on Mobile Shortcut */}
+              <button
+                type="button"
+                onClick={() => stackOnMobile(id)}
+                className="w-full py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                <option value="flex-col">Vertical Column (flex-col)</option>
-                <option value="flex-row">Horizontal Row (flex-row)</option>
-              </select>
+                <Columns className="w-3.5 h-3.5" />
+                <span>Stack on mobile (column override)</span>
+              </button>
             </div>
           )}
         </div>
 
         {/* 2. STYLE CONTROLS */}
         <div className="space-y-4 pt-4 border-t border-white/10">
-          <div className="flex items-center gap-1.5 font-semibold text-zinc-200 text-xs">
-            <Palette className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Styles & Typography</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 font-semibold text-zinc-200 text-xs">
+              <Palette className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Styles & Typography</span>
+            </div>
+            {activeBreakpoint !== 'desktop' && (
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                {activeBreakpoint} overrides
+              </span>
+            )}
           </div>
 
           {/* Typography Controls */}
@@ -399,18 +727,41 @@ export default function PropertiesInspector() {
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-zinc-400">Font Size</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-zinc-400">Font Size</label>
+                    {isOverriddenAtBreakpoint('fontSize') && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetOverride('fontSize')}
+                        className="text-[9px] text-amber-400 underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    value={styles.fontSize || '16px'}
+                    value={effectiveStyles.fontSize || '16px'}
                     onChange={(e) => handleStyleChange('fontSize', e.target.value)}
                     className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                   />
                 </div>
+
                 <div className="space-y-1">
-                  <label className="text-[10px] text-zinc-400">Font Weight</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-zinc-400">Font Weight</label>
+                    {isOverriddenAtBreakpoint('fontWeight') && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetOverride('fontWeight')}
+                        className="text-[9px] text-amber-400 underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
                   <select
-                    value={styles.fontWeight || '400'}
+                    value={effectiveStyles.fontWeight || '400'}
                     onChange={(e) => handleStyleChange('fontWeight', e.target.value)}
                     className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs"
                   >
@@ -426,7 +777,7 @@ export default function PropertiesInspector() {
               <div className="space-y-1">
                 <label className="text-[10px] text-zinc-400">Font Family</label>
                 <select
-                  value={styles.fontFamily || 'Inter, sans-serif'}
+                  value={effectiveStyles.fontFamily || 'Inter, sans-serif'}
                   onChange={(e) => handleStyleChange('fontFamily', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs"
                 >
@@ -443,13 +794,13 @@ export default function PropertiesInspector() {
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
-                    value={styles.color || '#ffffff'}
+                    value={effectiveStyles.color || '#ffffff'}
                     onChange={(e) => handleStyleChange('color', e.target.value)}
                     className="w-7 h-7 rounded-lg bg-transparent border border-white/20 cursor-pointer p-0 shrink-0"
                   />
                   <input
                     type="text"
-                    value={styles.color || '#ffffff'}
+                    value={effectiveStyles.color || '#ffffff'}
                     onChange={(e) => handleStyleChange('color', e.target.value)}
                     className="flex-1 px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                   />
@@ -464,13 +815,13 @@ export default function PropertiesInspector() {
             <div className="flex items-center gap-2">
               <input
                 type="color"
-                value={styles.backgroundColor || '#09090b'}
+                value={effectiveStyles.backgroundColor || '#09090b'}
                 onChange={(e) => handleStyleChange('backgroundColor', e.target.value)}
                 className="w-7 h-7 rounded-lg bg-transparent border border-white/20 cursor-pointer p-0 shrink-0"
               />
               <input
                 type="text"
-                value={styles.backgroundColor || ''}
+                value={effectiveStyles.backgroundColor || ''}
                 placeholder="transparent"
                 onChange={(e) => handleStyleChange('backgroundColor', e.target.value)}
                 className="flex-1 px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
@@ -494,7 +845,7 @@ export default function PropertiesInspector() {
                 <label className="text-[10px] text-zinc-400">Padding</label>
                 <input
                   type="text"
-                  value={styles.padding || ''}
+                  value={effectiveStyles.padding || ''}
                   placeholder="e.g. 16px 24px"
                   onChange={(e) => handleStyleChange('padding', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
@@ -504,7 +855,7 @@ export default function PropertiesInspector() {
                 <label className="text-[10px] text-zinc-400">Margin</label>
                 <input
                   type="text"
-                  value={styles.margin || ''}
+                  value={effectiveStyles.margin || ''}
                   placeholder="e.g. 0 auto"
                   onChange={(e) => handleStyleChange('margin', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
@@ -514,21 +865,43 @@ export default function PropertiesInspector() {
 
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <label className="text-[10px] text-zinc-400">Width</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-zinc-400">Width</label>
+                  {isOverriddenAtBreakpoint('width') && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetOverride('width')}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  value={styles.width || ''}
-                  placeholder="auto / 320px / 100%"
+                  value={effectiveStyles.width || ''}
+                  placeholder="auto / 100%"
                   onChange={(e) => handleStyleChange('width', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-zinc-400">Height</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-zinc-400">Height</label>
+                  {isOverriddenAtBreakpoint('height') && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetOverride('height')}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  value={styles.height || ''}
-                  placeholder="auto / 180px"
+                  value={effectiveStyles.height || ''}
+                  placeholder="auto"
                   onChange={(e) => handleStyleChange('height', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
@@ -540,18 +913,29 @@ export default function PropertiesInspector() {
                 <label className="text-[10px] text-zinc-400">Border Radius</label>
                 <input
                   type="text"
-                  value={styles.borderRadius || ''}
+                  value={effectiveStyles.borderRadius || ''}
                   placeholder="8px"
                   onChange={(e) => handleStyleChange('borderRadius', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-zinc-400">Max Width</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-zinc-400">Max Width</label>
+                  {isOverriddenAtBreakpoint('maxWidth') && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetOverride('maxWidth')}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  value={styles.maxWidth || ''}
-                  placeholder="1200px"
+                  value={effectiveStyles.maxWidth || ''}
+                  placeholder="100%"
                   onChange={(e) => handleStyleChange('maxWidth', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
@@ -584,10 +968,10 @@ export default function PropertiesInspector() {
                 <label className="text-[10px] text-zinc-400">X Offset (px)</label>
                 <input
                   type="number"
-                  value={parseTranslate(styles.transform).x}
+                  value={parseTranslate(effectiveStyles.transform).x}
                   onChange={(e) => {
                     const x = parseFloat(e.target.value) || 0;
-                    const y = parseTranslate(styles.transform).y;
+                    const y = parseTranslate(effectiveStyles.transform).y;
                     handleStyleChange('transform', `translate(${x}px, ${y}px)`);
                   }}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
@@ -597,9 +981,9 @@ export default function PropertiesInspector() {
                 <label className="text-[10px] text-zinc-400">Y Offset (px)</label>
                 <input
                   type="number"
-                  value={parseTranslate(styles.transform).y}
+                  value={parseTranslate(effectiveStyles.transform).y}
                   onChange={(e) => {
-                    const x = parseTranslate(styles.transform).x;
+                    const x = parseTranslate(effectiveStyles.transform).x;
                     const y = parseFloat(e.target.value) || 0;
                     handleStyleChange('transform', `translate(${x}px, ${y}px)`);
                   }}
@@ -607,9 +991,6 @@ export default function PropertiesInspector() {
                 />
               </div>
             </div>
-            <p className="text-[10px] text-zinc-500">
-              💡 Drag component directly on canvas or use Arrow keys (Shift+Arrow = 10px) to move.
-            </p>
           </div>
         )}
       </div>

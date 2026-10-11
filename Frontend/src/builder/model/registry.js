@@ -129,10 +129,11 @@ export const NODE_REGISTRY = Object.freeze({
     label: 'Image',
     isContainer: false,
     allowedChildren: [],
-    allowedProps: ['src', 'alt', 'assetId'],
+    allowedProps: ['src', 'alt', 'assetId', 'isDecorative'],
     defaultProps: {
       src: '/img2.jpg',
       alt: 'Visual element',
+      isDecorative: false,
     },
     defaultStyles: {
       width: '100%',
@@ -146,11 +147,12 @@ export const NODE_REGISTRY = Object.freeze({
     label: 'Button',
     isContainer: false,
     allowedChildren: [],
-    allowedProps: ['label', 'href', 'target'],
+    allowedProps: ['label', 'href', 'target', 'linkTarget'],
     defaultProps: {
       label: 'Explore Canvas',
       href: '#',
       target: '_self',
+      linkTarget: { type: 'none' },
     },
     defaultStyles: {
       display: 'inline-flex',
@@ -172,11 +174,12 @@ export const NODE_REGISTRY = Object.freeze({
     label: 'Link',
     isContainer: false,
     allowedChildren: [],
-    allowedProps: ['text', 'href', 'target'],
+    allowedProps: ['text', 'href', 'target', 'linkTarget'],
     defaultProps: {
       text: 'Documentation & Guides',
       href: '#',
       target: '_self',
+      linkTarget: { type: 'none' },
     },
     defaultStyles: {
       color: '#818cf8',

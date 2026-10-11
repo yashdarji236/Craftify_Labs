@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/editorContext.jsx';
+import PagesPanel from './PagesPanel.jsx';
+import AssetsPanel from './AssetsPanel.jsx';
 import {
   Layers,
   ChevronDown,
@@ -23,7 +25,11 @@ import {
   Check,
   X,
   GripVertical,
+  FileText,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
+import { resolveStyles } from '../model/breakpoints.js';
 
 const PALETTE_ICONS = {
   Page: Layout,
@@ -58,11 +64,15 @@ function LayerRow({
   const [nameInput, setNameInput] = useState(node.name || node.type);
   const editInputRef = useRef(null);
 
-  const { moveNode } = useEditorStore();
+  const { moveNode, activeBreakpoint, setResponsiveVisibility } = useEditorStore();
 
   const isSelected = selectedId === node.id;
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
   const Icon = PALETTE_ICONS[node.type] || Box;
+
+  // Compute resolved styles to see if hidden at active breakpoint
+  const effectiveStyles = resolveStyles(node, activeBreakpoint);
+  const isHidden = effectiveStyles.display === 'none';
 
   useEffect(() => {
     setNameInput(node.name || node.type);
@@ -110,22 +120,17 @@ function LayerRow({
     e.preventDefault();
     e.stopPropagation();
     try {
-      const raw = e.dataTransfer.getData('application/json');
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      if (data.source === 'layer' && data.targetId) {
-        if (data.targetId !== node.id) {
-          moveNode(data.targetId, node.id);
-        }
+      const data = JSON.parse(e.dataTransfer.getData('application/json'));
+      if (data?.source === 'layer' && data.targetId && data.targetId !== node.id) {
+        moveNode(data.targetId, node.id, -1);
       }
-    } catch { }
+    } catch {}
   };
 
   return (
-    <div className="select-none text-xs">
+    <div className="flex flex-col select-none">
       <div
-        id={`layer-${node.id}`}
-        draggable={!isRoot}
+        draggable={!isRoot && !isEditing}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
@@ -133,33 +138,38 @@ function LayerRow({
           e.stopPropagation();
           onSelect(node.id);
         }}
-        style={{ paddingLeft: `${depth * 14 + 8}px` }}
-        className={`group relative flex items-center gap-1.5 py-1.5 pr-2 rounded-xl cursor-pointer transition-all ${isSelected
-          ? 'bg-white/15 text-white border border-white/20 shadow-sm'
-          : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent'
-          }`}
+        style={{ paddingLeft: `${Math.max(6, depth * 14)}px` }}
+        className={`group relative flex items-center justify-between py-1.5 pr-2 rounded-xl text-xs font-medium cursor-pointer transition-all ${
+          isSelected
+            ? 'bg-indigo-600/25 border border-indigo-500/40 text-white shadow-sm'
+            : isHidden
+              ? 'opacity-40 hover:opacity-80 text-zinc-400 hover:bg-white/5'
+              : 'text-zinc-300 hover:text-white hover:bg-white/5'
+        }`}
       >
-        {/* Expand / Collapse toggle */}
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCollapsed(!collapsed);
-            }}
-            className="p-0.5 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300 shrink-0"
-          >
-            {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
-        ) : (
-          <span className="w-4 shrink-0 inline-block" />
-        )}
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-1">
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCollapsed(!collapsed);
+              }}
+              className="p-0.5 rounded hover:bg-white/10 text-zinc-400 hover:text-zinc-200"
+            >
+              {collapsed ? (
+                <ChevronRight className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+            </button>
+          ) : (
+            <div className="w-4 h-4 shrink-0" />
+          )}
 
-        <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-zinc-500'}`} />
+          <Icon className="w-3.5 h-3.5 shrink-0 text-zinc-400 group-hover:text-zinc-200" />
 
-        {/* Name / Inline Edit */}
-        {isEditing ? (
-          <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+          {isEditing ? (
             <input
               ref={editInputRef}
               type="text"
@@ -167,79 +177,86 @@ function LayerRow({
               onChange={(e) => setNameInput(e.target.value)}
               onBlur={handleCommitRename}
               onKeyDown={handleKeyDown}
-              className="w-full px-1.5 py-0.5 bg-black/80 border border-white/30 rounded text-xs text-white focus:outline-none"
+              onClick={(e) => e.stopPropagation()}
+              className="px-1 py-0.5 rounded bg-black/60 border border-white/30 text-white text-xs w-full focus:outline-none"
             />
+          ) : (
+            <span
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(true);
+              }}
+              className="truncate text-[11px]"
+            >
+              {node.name || node.type}
+            </span>
+          )}
+
+          {isHidden && (
+            <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/10 text-zinc-400" title="Hidden on active breakpoint">
+              hidden
+            </span>
+          )}
+        </div>
+
+        {/* Action icons */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          {/* Toggle visibility shortcut */}
+          {!isRoot && (
             <button
               type="button"
-              onClick={handleCommitRename}
-              className="p-0.5 hover:text-emerald-400"
+              title={isHidden ? `Show on ${activeBreakpoint}` : `Hide on ${activeBreakpoint}`}
+              onClick={() => setResponsiveVisibility(node.id, activeBreakpoint, !isHidden)}
+              className="p-1 rounded text-zinc-400 hover:text-white hover:bg-white/10"
             >
-              <Check className="w-3 h-3" />
+              {isHidden ? <EyeOff className="w-3 h-3 text-amber-400" /> : <Eye className="w-3 h-3" />}
             </button>
-          </div>
-        ) : (
-          <span
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (!isRoot) setIsEditing(true);
-            }}
-            className="font-medium truncate max-w-[110px] flex-1 text-left"
-            title="Double click to rename"
-          >
-            {node.type === 'Heading' && (!node.name || node.name === 'Heading')
-              ? `Heading (${(node.props?.level || 'h2').toUpperCase()})`
-              : (node.name || node.type)}
-          </span>
-        )}
+          )}
 
-        {/* Hover Action Buttons */}
-        {!isEditing && (
-          <div
-            className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 ml-auto transition-opacity"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {!isRoot && (
-              <>
-                <button
-                  type="button"
-                  title="Move Up"
-                  onClick={() => onMoveUp(node.id)}
-                  className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white"
-                >
-                  <ArrowUp className="w-2.5 h-2.5" />
-                </button>
-                <button
-                  type="button"
-                  title="Move Down"
-                  onClick={() => onMoveDown(node.id)}
-                  className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white"
-                >
-                  <ArrowDown className="w-2.5 h-2.5" />
-                </button>
-                <button
-                  type="button"
-                  title="Duplicate"
-                  onClick={() => onDuplicate(node.id)}
-                  className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white"
-                >
-                  <Copy className="w-2.5 h-2.5" />
-                </button>
-                <button
-                  type="button"
-                  title="Delete"
-                  onClick={() => onDelete(node.id)}
-                  className="p-1 rounded hover:bg-rose-500/20 text-zinc-400 hover:text-rose-400"
-                >
-                  <Trash2 className="w-2.5 h-2.5" />
-                </button>
-              </>
-            )}
-          </div>
-        )}
+          {!isRoot && (
+            <>
+              <button
+                type="button"
+                title="Move Up"
+                onClick={() => onMoveUp(node.id)}
+                className="p-1 rounded text-zinc-400 hover:text-white hover:bg-white/10"
+              >
+                <ArrowUp className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                title="Move Down"
+                onClick={() => onMoveDown(node.id)}
+                className="p-1 rounded text-zinc-400 hover:text-white hover:bg-white/10"
+              >
+                <ArrowDown className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                title="Duplicate"
+                onClick={() => onDuplicate(node.id)}
+                className="p-1 rounded text-zinc-400 hover:text-white hover:bg-white/10"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                title="Delete"
+                onClick={() => onDelete(node.id)}
+                className="p-1 rounded text-rose-400 hover:text-rose-200 hover:bg-rose-500/10"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {hasChildren && !collapsed && (
-        <div className="space-y-0.5 mt-0.5">
+        <div className="flex flex-col">
           {node.children.map((child) => (
             <LayerRow
               key={child.id}
@@ -272,9 +289,10 @@ export default function LayersPanel() {
     moveDown,
   } = useEditorStore();
 
+  const [activeTab, setActiveTab] = useState('layers'); // 'layers' | 'pages' | 'assets'
+
   const handleSelect = (id) => {
     setSelectedNodeId(id);
-    // Scroll canvas element into view smoothly
     const canvasElem = document.querySelector(`[data-node-id="${id}"]`);
     if (canvasElem) {
       canvasElem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -283,31 +301,76 @@ export default function LayersPanel() {
 
   return (
     <aside className="w-64 border-r border-white/10 bg-[#0e0e12]/90 backdrop-blur-2xl flex flex-col shrink-0 z-10 select-none">
-      <div className="p-3.5 border-b border-white/10 flex items-center justify-between text-xs font-semibold text-zinc-200">
-        <div className="flex items-center gap-2">
-          <Layers className="w-3.5 h-3.5 text-zinc-300" />
-          <span>Layers Tree</span>
-        </div>
-        <span className="text-[10px] font-mono text-zinc-500">AST Map</span>
+      {/* 3-Tab Header Switcher */}
+      <div className="p-2 border-b border-white/10 bg-[#111114] grid grid-cols-3 gap-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab('layers')}
+          className={`py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'layers'
+              ? 'bg-white/15 text-white shadow-sm'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+          }`}
+        >
+          <Layers className="w-3 h-3" />
+          <span>Layers</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('pages')}
+          className={`py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'pages'
+              ? 'bg-white/15 text-white shadow-sm'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+          }`}
+        >
+          <FileText className="w-3 h-3" />
+          <span>Pages</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('assets')}
+          className={`py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'assets'
+              ? 'bg-white/15 text-white shadow-sm'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+          }`}
+        >
+          <ImageIcon className="w-3 h-3" />
+          <span>Assets</span>
+        </button>
       </div>
 
-      <div className="p-2 overflow-y-auto flex-1">
-        {activePage?.root ? (
-          <LayerRow
-            node={activePage.root}
-            selectedId={selectedNodeId}
-            onSelect={handleSelect}
-            onRename={renameNode}
-            onDuplicate={duplicateNode}
-            onDelete={removeNode}
-            onMoveUp={moveUp}
-            onMoveDown={moveDown}
-            isRoot={true}
-          />
-        ) : (
-          <p className="text-xs text-zinc-500 p-2">No root layer found.</p>
-        )}
-      </div>
+      {/* Panel Content based on Tab */}
+      {activeTab === 'pages' && <PagesPanel />}
+      {activeTab === 'assets' && <AssetsPanel />}
+      {activeTab === 'layers' && (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="p-3 border-b border-white/5 flex items-center justify-between text-[11px] text-zinc-400">
+            <span>Element Hierarchy</span>
+            <span className="font-mono text-[10px] text-zinc-500">AST Map</span>
+          </div>
+          <div className="p-2 overflow-y-auto flex-1">
+            {activePage?.root ? (
+              <LayerRow
+                node={activePage.root}
+                selectedId={selectedNodeId}
+                onSelect={handleSelect}
+                onRename={renameNode}
+                onDuplicate={duplicateNode}
+                onDelete={removeNode}
+                onMoveUp={moveUp}
+                onMoveDown={moveDown}
+                isRoot={true}
+              />
+            ) : (
+              <p className="text-xs text-zinc-500 p-2">No root layer found.</p>
+            )}
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

@@ -1,6 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, useContext, memo } from 'react';
 import { useEditorStore } from '../store/editorContext.jsx';
-import { findParent, canNest, NODE_REGISTRY, HEADING_LEVEL_DEFAULTS } from '../model/index.js';
+import {
+  findParent,
+  canNest,
+  NODE_REGISTRY,
+  HEADING_LEVEL_DEFAULTS,
+  resolveStyles,
+  resolveLinkTarget,
+  BREAKPOINTS,
+} from '../model/index.js';
 import {
   ArrowUp,
   ArrowDown,
@@ -22,6 +30,7 @@ import {
   Maximize2,
   ChevronDown,
   Move,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 export function parseTranslate(transformStr) {
@@ -282,6 +291,9 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     updateStyles,
     moveNode,
     addNode,
+    activeBreakpoint,
+    project,
+    getAssetBlobUrl,
   } = useEditorStore();
 
   const { zoom, tool } = useContext(CanvasContext);
@@ -524,13 +536,17 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     }
   };
 
-  // Base and active dynamic styles
-  const baseStyle = node.styles || {};
-  const baseTranslate = parseTranslate(baseStyle.transform);
-  const currentTranslate = liveTranslate || (baseStyle.transform ? baseTranslate : null);
+  // Resolved responsive styles cascading: base -> tablet -> mobile
+  const resolvedStyle = resolveStyles(node, activeBreakpoint);
+  const isHiddenOnBreakpoint = resolvedStyle.display === 'none';
+
+  const baseTranslate = parseTranslate(resolvedStyle.transform);
+  const currentTranslate = liveTranslate || (resolvedStyle.transform ? baseTranslate : null);
 
   const activeStyle = {
-    ...baseStyle,
+    boxSizing: 'border-box',
+    overflowWrap: 'anywhere',
+    ...resolvedStyle,
     ...(currentTranslate ? { transform: `translate(${currentTranslate.x}px, ${currentTranslate.y}px)` } : {}),
     ...(liveSize && (resizingInfo?.dir?.includes('e') || resizingInfo?.dir?.includes('w'))
       ? { width: `${liveSize.width}px` }
@@ -539,6 +555,11 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       ? { height: `${liveSize.height}px` }
       : {}),
   };
+
+  // If element is hidden on this breakpoint and not selected, hide from canvas
+  if (isHiddenOnBreakpoint && !isSelected) {
+    return null;
+  }
 
   // Render children recursively with drop zones between them
   const isContainerNode = NODE_REGISTRY[node.type]?.isContainer;
@@ -735,20 +756,51 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       );
     }
 
-    case 'Image':
+    case 'Image': {
+      const assetUrl = node.props?.assetId ? getAssetBlobUrl(node.props.assetId) : node.props?.src;
+      const isDecorative = Boolean(node.props?.isDecorative);
+      const altText = isDecorative ? '' : (node.props?.alt || 'Visual asset');
+
       return (
         <div {...commonProps} className={animClasses}>
           {renderSelectionOverlays()}
-          <img
-            src={String(node.props?.src || '/img2.jpg')}
-            alt={String(node.props?.alt || 'Visual asset')}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            className="block rounded-[inherit]"
-          />
+          {assetUrl ? (
+            <img
+              src={assetUrl}
+              alt={altText}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if (e.currentTarget.nextSibling) {
+                  e.currentTarget.nextSibling.style.display = 'flex';
+                }
+              }}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', maxWidth: '100%' }}
+              className="block rounded-[inherit]"
+            />
+          ) : null}
+          <div
+            style={{ display: assetUrl ? 'none' : 'flex' }}
+            className="w-full h-full min-h-[140px] bg-[#18181c] border border-dashed border-white/20 rounded-[inherit] flex flex-col items-center justify-center p-4 text-center text-zinc-400 select-none"
+          >
+            <ImageIcon className="w-6 h-6 text-zinc-500 mb-1" />
+            <span className="text-[11px] font-medium text-zinc-300">
+              {node.props?.assetId ? 'Missing or Loading Asset' : 'Image Placeholder'}
+            </span>
+            <span className="text-[9px] font-mono text-zinc-500 mt-0.5">
+              {node.props?.assetId ? `Asset ID: ${node.props.assetId}` : 'No image source assigned'}
+            </span>
+          </div>
         </div>
       );
+    }
 
     case 'Button': {
+      const linkTarget = node.props?.linkTarget;
+      const resolvedHref = linkTarget && linkTarget.type !== 'none'
+        ? resolveLinkTarget(linkTarget, project?.pages || [])
+        : node.props?.href || '#';
+      const isNewTab = linkTarget?.newTab || node.props?.target === '_blank';
+
       if (isInlineEditing) {
         return (
           <input
@@ -765,14 +817,26 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       }
 
       return (
-        <button type="button" {...commonProps} className={animClasses}>
+        <a
+          href={resolvedHref}
+          target={isNewTab ? '_blank' : '_self'}
+          rel={isNewTab ? 'noopener noreferrer' : undefined}
+          {...commonProps}
+          className={`inline-block text-center cursor-pointer ${animClasses}`}
+        >
           {renderSelectionOverlays()}
           {String(node.props?.label ?? 'Click Me')}
-        </button>
+        </a>
       );
     }
 
     case 'Link': {
+      const linkTarget = node.props?.linkTarget;
+      const resolvedHref = linkTarget && linkTarget.type !== 'none'
+        ? resolveLinkTarget(linkTarget, project?.pages || [])
+        : node.props?.href || '#';
+      const isNewTab = linkTarget?.newTab || node.props?.target === '_blank';
+
       if (isInlineEditing) {
         return (
           <input
@@ -789,14 +853,17 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       }
 
       return (
-        <span
+        <a
+          href={resolvedHref}
+          target={isNewTab ? '_blank' : '_self'}
+          rel={isNewTab ? 'noopener noreferrer' : undefined}
           {...commonProps}
           style={{ display: 'inline-block', ...activeStyle }}
           className={`cursor-pointer ${animClasses}`}
         >
           {renderSelectionOverlays()}
           {String(node.props?.text ?? 'Link text')}
-        </span>
+        </a>
       );
     }
 
@@ -829,7 +896,13 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
 });
 
 export default function CanvasRenderer() {
-  const { activePage, selectedNodeId, setSelectedNodeId } = useEditorStore();
+  const {
+    activePage,
+    selectedNodeId,
+    setSelectedNodeId,
+    activeBreakpoint,
+    setActiveBreakpoint,
+  } = useEditorStore();
 
   const containerRef = useRef(null);
   const zoomMenuRef = useRef(null);
@@ -839,18 +912,17 @@ export default function CanvasRenderer() {
   const [isPanning, setIsPanning] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [tool, setTool] = useState('select'); // 'select' | 'hand'
-  const [device, setDevice] = useState('desktop'); // 'desktop' | 'tablet' | 'mobile'
   const [showGrid, setShowGrid] = useState(true);
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [showNavHint, setShowNavHint] = useState(true);
 
   const deviceWidths = {
-    desktop: { width: 'w-[1200px]', label: 'Desktop — 1200px' },
+    desktop: { width: 'w-[1280px]', label: 'Desktop — 1280px' },
     tablet: { width: 'w-[768px]', label: 'Tablet — 768px' },
-    mobile: { width: 'w-[390px]', label: 'Mobile — 390px' },
+    mobile: { width: 'w-[375px]', label: 'Mobile — 375px' },
   };
 
-  const currentDevice = deviceWidths[device] || deviceWidths.desktop;
+  const currentDevice = deviceWidths[activeBreakpoint] || deviceWidths.desktop;
 
   const handleZoomIn = useCallback(() => {
     setZoom((z) => Math.min(250, z + 10));
@@ -872,7 +944,7 @@ export default function CanvasRenderer() {
     const availableH = Math.max(200, rect.height - 180);
 
     const targetW =
-      device === 'desktop' ? 1200 : device === 'tablet' ? 768 : 390;
+      activeBreakpoint === 'desktop' ? 1280 : activeBreakpoint === 'tablet' ? 768 : 375;
     const targetH = 800;
 
     const scaleW = availableW / targetW;
@@ -882,7 +954,7 @@ export default function CanvasRenderer() {
     const optimalZoom = Math.min(150, Math.max(25, Math.round((scale * 100) / 5) * 5));
     setZoom(optimalZoom);
     setPan({ x: 0, y: 0 });
-  }, [device]);
+  }, [activeBreakpoint]);
 
   // Non-passive wheel event listener on containerRef for smooth zoom and pan
   useEffect(() => {
@@ -1172,10 +1244,10 @@ export default function CanvasRenderer() {
           <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
             <button
               type="button"
-              title="Desktop View (1200px)"
-              onClick={() => setDevice('desktop')}
+              title="Desktop View (1280px)"
+              onClick={() => setActiveBreakpoint('desktop')}
               className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                device === 'desktop'
+                activeBreakpoint === 'desktop'
                   ? 'bg-white text-black shadow-sm font-bold'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
               }`}
@@ -1185,9 +1257,9 @@ export default function CanvasRenderer() {
             <button
               type="button"
               title="Tablet View (768px)"
-              onClick={() => setDevice('tablet')}
+              onClick={() => setActiveBreakpoint('tablet')}
               className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                device === 'tablet'
+                activeBreakpoint === 'tablet'
                   ? 'bg-white text-black shadow-sm font-bold'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
               }`}
@@ -1196,10 +1268,10 @@ export default function CanvasRenderer() {
             </button>
             <button
               type="button"
-              title="Mobile View (390px)"
-              onClick={() => setDevice('mobile')}
+              title="Mobile View (375px)"
+              onClick={() => setActiveBreakpoint('mobile')}
               className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                device === 'mobile'
+                activeBreakpoint === 'mobile'
                   ? 'bg-white text-black shadow-sm font-bold'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
               }`}

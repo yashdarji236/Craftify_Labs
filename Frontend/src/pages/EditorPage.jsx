@@ -8,6 +8,7 @@ import ComponentPalette from '../builder/editor/ComponentPalette.jsx';
 import LayersPanel from '../builder/editor/LayersPanel.jsx';
 import CanvasRenderer from '../builder/editor/CanvasRenderer.jsx';
 import PropertiesInspector from '../builder/editor/PropertiesInspector.jsx';
+import WarningsPanel from '../builder/editor/WarningsPanel.jsx';
 import {
   ArrowLeft,
   Download,
@@ -20,6 +21,10 @@ import {
   Code2,
   RefreshCw,
   X,
+  Monitor,
+  Tablet,
+  Smartphone,
+  ShieldAlert,
 } from 'lucide-react';
 import Toast from '../components/Toast';
 
@@ -36,10 +41,14 @@ function EditorToolbar({ onToast }) {
     redo,
     saveStatus,
     saveNow,
+    activeBreakpoint,
+    setActiveBreakpoint,
+    warnings,
   } = useEditorStore();
 
   const fileInputRef = useRef(null);
   const [importErrors, setImportErrors] = useState(null);
+  const [showWarnings, setShowWarnings] = useState(false);
 
   const handleExportJson = () => {
     if (!project) return;
@@ -127,8 +136,8 @@ function EditorToolbar({ onToast }) {
           </div>
         </div>
 
-        {/* Center: Undo / Redo & Save Status */}
-        <div className="flex items-center gap-2">
+        {/* Center: Undo / Redo, Breakpoint Switcher & Save Status */}
+        <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center rounded-xl bg-white/5 border border-white/10 p-0.5">
             <button
               onClick={undo}
@@ -148,15 +157,55 @@ function EditorToolbar({ onToast }) {
             </button>
           </div>
 
+          {/* Breakpoint Switcher */}
+          <div className="flex items-center rounded-xl bg-white/5 border border-white/10 p-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveBreakpoint('desktop')}
+              title="Desktop Breakpoint (1280px)"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                activeBreakpoint === 'desktop'
+                  ? 'bg-white text-black shadow-sm font-bold'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Monitor className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveBreakpoint('tablet')}
+              title="Tablet Breakpoint (768px)"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                activeBreakpoint === 'tablet'
+                  ? 'bg-white text-black shadow-sm font-bold'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Tablet className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveBreakpoint('mobile')}
+              title="Mobile Breakpoint (375px)"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                activeBreakpoint === 'mobile'
+                  ? 'bg-white text-black shadow-sm font-bold'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Smartphone className="w-4 h-4" />
+            </button>
+          </div>
+
           {/* Save Status Badge */}
           {saveStatus === 'saved' && (
-            <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="hidden lg:inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               <CheckCircle2 className="w-3 h-3" />
               <span>Saved</span>
             </span>
           )}
           {saveStatus === 'saving' && (
-            <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-white/5 text-zinc-400 border border-white/10 animate-pulse">
+            <span className="hidden lg:inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-white/5 text-zinc-400 border border-white/10 animate-pulse">
               <Loader2 className="w-3 h-3 animate-spin text-zinc-300" />
               <span>Saving...</span>
             </span>
@@ -173,8 +222,25 @@ function EditorToolbar({ onToast }) {
           )}
         </div>
 
-        {/* Right: Import / Export */}
+        {/* Right: Health Warnings, Import / Export */}
         <div className="flex items-center gap-2">
+          {/* Warnings Button */}
+          <button
+            type="button"
+            onClick={() => setShowWarnings(!showWarnings)}
+            title="Inspect project warnings"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              warnings.length > 0
+                ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30 text-amber-300'
+                : 'bg-white/5 hover:bg-white/10 border-white/10 text-zinc-400'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Health</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-white/10">
+              {warnings.length}
+            </span>
+          </button>
           <input
             type="file"
             ref={fileInputRef}
@@ -202,6 +268,11 @@ function EditorToolbar({ onToast }) {
           </button>
         </div>
       </header>
+
+      {/* Warnings Drawer */}
+      {showWarnings && (
+        <WarningsPanel onClose={() => setShowWarnings(false)} />
+      )}
 
       {/* Import Error Modal */}
       {importErrors && (
