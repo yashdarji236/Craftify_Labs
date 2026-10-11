@@ -21,7 +21,17 @@ import {
   Hand,
   Maximize2,
   ChevronDown,
+  Move,
 } from 'lucide-react';
+
+export function parseTranslate(transformStr) {
+  if (!transformStr || typeof transformStr !== 'string') return { x: 0, y: 0 };
+  const match = transformStr.match(/translate\(\s*(-?\d+(?:\.\d+)?)(?:px)?\s*,\s*(-?\d+(?:\.\d+)?)(?:px)?\s*\)/i);
+  if (match) {
+    return { x: parseFloat(match[1]) || 0, y: parseFloat(match[2]) || 0 };
+  }
+  return { x: 0, y: 0 };
+}
 
 const CanvasContext = React.createContext({
   zoom: 100,
@@ -32,7 +42,7 @@ const CanvasContext = React.createContext({
  * Floating Action Bar displayed above/at top of selected node.
  * Entirely overlay UI; never becomes part of the document AST.
  */
-function FloatingActionBar({ node, isRoot, onDragStart }) {
+function FloatingActionBar({ node, isRoot, onMoveStart }) {
   const {
     activePage,
     setSelectedNodeId,
@@ -40,6 +50,7 @@ function FloatingActionBar({ node, isRoot, onDragStart }) {
     moveDown,
     duplicateNode,
     removeNode,
+    updateStyles,
   } = useEditorStore();
 
   const handleSelectParent = (e) => {
@@ -51,6 +62,14 @@ function FloatingActionBar({ node, isRoot, onDragStart }) {
     }
   };
 
+  const currentTranslate = parseTranslate(node.styles?.transform);
+  const hasCustomPosition = currentTranslate.x !== 0 || currentTranslate.y !== 0;
+
+  const handleResetPosition = (e) => {
+    e.stopPropagation();
+    updateStyles(node.id, { transform: 'translate(0px, 0px)' });
+  };
+
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -58,12 +77,11 @@ function FloatingActionBar({ node, isRoot, onDragStart }) {
     >
       {!isRoot && (
         <div
-          draggable={true}
-          onDragStart={onDragStart}
-          title="Drag to reposition component"
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-mono font-bold cursor-grab active:cursor-grabbing mr-1 shadow-sm select-none"
+          onMouseDown={onMoveStart}
+          title="Click & drag to move component on canvas"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-mono font-bold cursor-move active:cursor-grabbing mr-1 shadow-sm select-none"
         >
-          <GripVertical className="w-3 h-3" />
+          <Move className="w-3 h-3" />
           <span>Move</span>
         </div>
       )}
@@ -74,6 +92,16 @@ function FloatingActionBar({ node, isRoot, onDragStart }) {
 
       {!isRoot && (
         <>
+          {hasCustomPosition && (
+            <button
+              type="button"
+              title="Reset position offset to (0, 0)"
+              onClick={handleResetPosition}
+              className="p-1 rounded hover:bg-white/15 text-indigo-300 hover:text-white"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+          )}
           <button
             type="button"
             title="Select parent container"
@@ -124,7 +152,7 @@ function FloatingActionBar({ node, isRoot, onDragStart }) {
  * Interactive Selection Border with 8 Resize Handles and Drag-to-Move Grip.
  * Rendered on top of the selected component on the canvas.
  */
-function SelectionResizeBox({ onResizeStart, isResizing, resizingSize, onDragStart }) {
+function SelectionResizeBox({ onResizeStart, isResizing, resizingSize, onMoveStart, isMoving, movingPos }) {
   const handles = [
     { dir: 'nw', cursor: 'nwse-resize', style: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2' },
     { dir: 'n', cursor: 'ns-resize', style: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2' },
@@ -146,13 +174,12 @@ function SelectionResizeBox({ onResizeStart, isResizing, resizingSize, onDragSta
 
       {/* Move Grip Pill at Top-Right of Component */}
       <span
-        draggable={true}
-        onDragStart={onDragStart}
-        title="Click & drag to move component"
-        className="pointer-events-auto block absolute -top-7 right-0 z-40 px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-mono font-bold cursor-grab active:cursor-grabbing shadow-lg select-none transition-colors"
+        onMouseDown={onMoveStart}
+        title="Click & drag to move component on canvas"
+        className="pointer-events-auto block absolute -top-7 right-0 z-40 px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-mono font-bold cursor-move active:cursor-grabbing shadow-lg select-none transition-colors"
       >
         <span className="flex items-center gap-1">
-          <GripVertical className="w-3 h-3" />
+          <Move className="w-3 h-3" />
           <span>Move</span>
         </span>
       </span>
@@ -161,6 +188,13 @@ function SelectionResizeBox({ onResizeStart, isResizing, resizingSize, onDragSta
       {isResizing && resizingSize && (
         <span className="pointer-events-none block absolute -bottom-7 left-1/2 -translate-x-1/2 z-40 px-2.5 py-0.5 rounded-md bg-zinc-950/95 border border-indigo-500 text-indigo-200 text-[10px] font-mono shadow-2xl select-none whitespace-nowrap font-bold">
           {resizingSize.width} &times; {resizingSize.height} px
+        </span>
+      )}
+
+      {/* Live Position Badge while Moving */}
+      {isMoving && movingPos && (
+        <span className="pointer-events-none block absolute -bottom-7 left-1/2 -translate-x-1/2 z-40 px-2.5 py-0.5 rounded-md bg-zinc-950/95 border border-indigo-500 text-indigo-200 text-[10px] font-mono shadow-2xl select-none whitespace-nowrap font-bold">
+          X: {movingPos.x > 0 ? `+${movingPos.x}` : movingPos.x}px, Y: {movingPos.y > 0 ? `+${movingPos.y}` : movingPos.y}px
         </span>
       )}
 
@@ -224,12 +258,13 @@ function DropZoneIndicator({ parentId, index, active }) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`transition-all duration-150 relative ${isOver
-        ? 'h-4 bg-indigo-500/30 border-2 border-indigo-400 rounded-lg my-1.5 shadow-[0_0_15px_rgba(99,102,241,0.8)] flex items-center justify-center text-[9px] font-mono font-bold text-white uppercase tracking-wider'
-        : 'h-1.5 opacity-0 hover:opacity-100 bg-white/10 my-0.5'
-        }`}
+      className={`transition-all duration-150 relative ${
+        isOver
+          ? 'h-7 bg-indigo-500/25 border-2 border-dashed border-indigo-400 rounded-xl my-2 shadow-[0_0_20px_rgba(99,102,241,0.6)] flex items-center justify-center text-[10px] font-mono font-bold text-indigo-200 uppercase tracking-wider'
+          : 'h-2 hover:h-6 opacity-0 hover:opacity-100 bg-indigo-500/10 hover:border-2 hover:border-dashed hover:border-indigo-400 rounded-lg my-0.5 flex items-center justify-center text-[9px] font-mono font-semibold text-zinc-400'
+      }`}
     >
-      {isOver && <span>Drop Here</span>}
+      <span>Drop Here</span>
     </div>
   );
 }
@@ -258,6 +293,8 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
 
   const [resizingInfo, setResizingInfo] = useState(null);
   const [liveSize, setLiveSize] = useState(null);
+  const [liveTranslate, setLiveTranslate] = useState(null);
+  const [isMoving, setIsMoving] = useState(false);
 
   const isSelected = selectedNodeId === node.id;
   const isHovered = hoveredNodeId === node.id && !isSelected;
@@ -324,6 +361,110 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     window.addEventListener('mouseup', handleMouseUp);
   };
 
+  // Move handler for free dragging on canvas
+  const handleMoveStart = (e) => {
+    if (tool === 'hand' || isRoot || isInlineEditing || isResizing) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const currentTranslate = parseTranslate(node.styles?.transform);
+    const scale = (zoom || 100) / 100;
+    let moved = false;
+
+    setIsMoving(true);
+    setLiveTranslate(currentTranslate);
+
+    const onMouseMove = (moveEvent) => {
+      const deltaX = (moveEvent.clientX - startX) / scale;
+      const deltaY = (moveEvent.clientY - startY) / scale;
+
+      if (!moved && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+        moved = true;
+      }
+
+      const newX = Math.round(currentTranslate.x + deltaX);
+      const newY = Math.round(currentTranslate.y + deltaY);
+      setLiveTranslate({ x: newX, y: newY });
+    };
+
+    const onMouseUp = (upEvent) => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      if (moved) {
+        const deltaX = (upEvent.clientX - startX) / scale;
+        const deltaY = (upEvent.clientY - startY) / scale;
+        const finalX = Math.round(currentTranslate.x + deltaX);
+        const finalY = Math.round(currentTranslate.y + deltaY);
+
+        updateStyles(node.id, {
+          transform: `translate(${finalX}px, ${finalY}px)`,
+        });
+      }
+
+      setIsMoving(false);
+      setLiveTranslate(null);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  // Node mousedown: if user drags the selected node itself, move it!
+  const handleNodeMouseDown = (e) => {
+    if (tool === 'hand' || isRoot || isInlineEditing || isResizing) return;
+    if (e.button !== 0) return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.closest('button')) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const currentTranslate = parseTranslate(node.styles?.transform);
+    const scale = (zoom || 100) / 100;
+    let isDragMoving = false;
+
+    const onMouseMove = (moveEvent) => {
+      const deltaX = (moveEvent.clientX - startX) / scale;
+      const deltaY = (moveEvent.clientY - startY) / scale;
+
+      if (!isDragMoving && (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4)) {
+        isDragMoving = true;
+        setIsMoving(true);
+        setSelectedNodeId(node.id);
+      }
+
+      if (isDragMoving) {
+        const newX = Math.round(currentTranslate.x + deltaX);
+        const newY = Math.round(currentTranslate.y + deltaY);
+        setLiveTranslate({ x: newX, y: newY });
+      }
+    };
+
+    const onMouseUp = (upEvent) => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      if (isDragMoving) {
+        const deltaX = (upEvent.clientX - startX) / scale;
+        const deltaY = (upEvent.clientY - startY) / scale;
+        const finalX = Math.round(currentTranslate.x + deltaX);
+        const finalY = Math.round(currentTranslate.y + deltaY);
+
+        updateStyles(node.id, {
+          transform: `translate(${finalX}px, ${finalY}px)`,
+        });
+
+        setIsMoving(false);
+        setLiveTranslate(null);
+      }
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
   // Text content extraction for editable elements
   const isTextEditable = ['Heading', 'Text', 'Button', 'Link'].includes(node.type);
 
@@ -383,20 +524,14 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     }
   };
 
-  const handleDragStart = (e) => {
-    if (isRoot) return;
-    e.stopPropagation();
-    e.dataTransfer.setData(
-      'application/json',
-      JSON.stringify({ source: 'canvas', targetId: node.id })
-    );
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
   // Base and active dynamic styles
   const baseStyle = node.styles || {};
+  const baseTranslate = parseTranslate(baseStyle.transform);
+  const currentTranslate = liveTranslate || (baseStyle.transform ? baseTranslate : null);
+
   const activeStyle = {
     ...baseStyle,
+    ...(currentTranslate ? { transform: `translate(${currentTranslate.x}px, ${currentTranslate.y}px)` } : {}),
     ...(liveSize && (resizingInfo?.dir?.includes('e') || resizingInfo?.dir?.includes('w'))
       ? { width: `${liveSize.width}px` }
       : {}),
@@ -430,11 +565,13 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       ? 'outline-dashed outline-1 outline-white/50 relative'
       : 'relative';
 
-  const animClasses = isResizing ? 'relative' : `transition-all ${outlineClasses}`;
+  const cursorClass = isSelected && !isRoot && !isInlineEditing ? 'cursor-move' : '';
+  const animClasses = isResizing || isMoving ? 'relative' : `transition-all ${outlineClasses} ${cursorClass}`;
 
   const commonProps = {
     ref: nodeRef,
     'data-node-id': node.id,
+    onMouseDown: handleNodeMouseDown,
     onClick: tool === 'hand' ? undefined : handleClick,
     onDoubleClick: tool === 'hand' ? undefined : handleDoubleClick,
     onMouseEnter: (e) => {
@@ -446,8 +583,6 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       e.stopPropagation();
       setHoveredNodeId(null);
     },
-    draggable: tool !== 'hand' && !isRoot && !isInlineEditing && !isResizing,
-    onDragStart: handleDragStart,
     style: activeStyle,
   };
 
@@ -459,14 +594,16 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
         <FloatingActionBar
           node={node}
           isRoot={false}
-          onDragStart={handleDragStart}
+          onMoveStart={handleMoveStart}
         />
         <SelectionResizeBox
           node={node}
           onResizeStart={handleResizeStart}
           isResizing={isResizing}
           resizingSize={liveSize}
-          onDragStart={handleDragStart}
+          onMoveStart={handleMoveStart}
+          isMoving={isMoving}
+          movingPos={liveTranslate}
         />
       </>
     );

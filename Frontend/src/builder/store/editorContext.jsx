@@ -38,8 +38,14 @@ import { projectStorage } from '../storage/index.js';
 
 const EditorContext = createContext(null);
 
-const MAX_HISTORY = 100;
-const GROUPING_WINDOW_MS = 500;
+function parseTranslate(transformStr) {
+  if (!transformStr || typeof transformStr !== 'string') return { x: 0, y: 0 };
+  const match = transformStr.match(/translate\(\s*(-?\d+(?:\.\d+)?)(?:px)?\s*,\s*(-?\d+(?:\.\d+)?)(?:px)?\s*\)/i);
+  if (match) {
+    return { x: parseFloat(match[1]) || 0, y: parseFloat(match[2]) || 0 };
+  }
+  return { x: 0, y: 0 };
+}
 
 export function EditorProvider({ initialProject, onToast, children }) {
   // Current document model
@@ -656,6 +662,32 @@ export function EditorProvider({ initialProject, onToast, children }) {
       if (e.altKey && e.key === 'ArrowDown') {
         e.preventDefault();
         if (selectedNodeId) moveDownCmd(selectedNodeId);
+        return;
+      }
+
+      // Nudge component with Arrow keys: ArrowUp, ArrowDown, ArrowLeft, ArrowRight
+      if (!e.altKey && !modKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (selectedNodeId && activePage?.root && selectedNodeId !== activePage.root.id) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 2;
+          const targetNode = findNode(activePage.root, selectedNodeId);
+          if (targetNode) {
+            const currentTranslate = parseTranslate(targetNode.styles?.transform);
+            let dx = 0;
+            let dy = 0;
+            if (e.key === 'ArrowLeft') dx = -step;
+            if (e.key === 'ArrowRight') dx = step;
+            if (e.key === 'ArrowUp') dy = -step;
+            if (e.key === 'ArrowDown') dy = step;
+            updateStylesCmd(
+              selectedNodeId,
+              {
+                transform: `translate(${currentTranslate.x + dx}px, ${currentTranslate.y + dy}px)`,
+              },
+              true
+            );
+          }
+        }
         return;
       }
 

@@ -12,7 +12,10 @@ import {
   Info,
   CheckCircle2,
   Sparkles,
+  Move,
+  RotateCcw,
 } from 'lucide-react';
+import { parseTranslate } from './CanvasRenderer.jsx';
 
 /**
  * Calculates WCAG relative luminance and contrast ratio.
@@ -556,6 +559,59 @@ export default function PropertiesInspector() {
             </div>
           </div>
         </div>
+
+        {/* 3. POSITION & CANVAS OFFSET */}
+        {type !== 'Page' && (
+          <div className="space-y-3 pt-4 border-t border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-zinc-200 text-xs">
+                <Move className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Canvas Position (X, Y)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleStyleChange('transform', 'translate(0px, 0px)')}
+                className="text-[10px] text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1 cursor-pointer"
+                title="Reset to (0, 0)"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                <span>Reset</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] text-zinc-400">X Offset (px)</label>
+                <input
+                  type="number"
+                  value={parseTranslate(styles.transform).x}
+                  onChange={(e) => {
+                    const x = parseFloat(e.target.value) || 0;
+                    const y = parseTranslate(styles.transform).y;
+                    handleStyleChange('transform', `translate(${x}px, ${y}px)`);
+                  }}
+                  className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-zinc-400">Y Offset (px)</label>
+                <input
+                  type="number"
+                  value={parseTranslate(styles.transform).y}
+                  onChange={(e) => {
+                    const x = parseTranslate(styles.transform).x;
+                    const y = parseFloat(e.target.value) || 0;
+                    handleStyleChange('transform', `translate(${x}px, ${y}px)`);
+                  }}
+                  className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-zinc-500">
+              💡 Drag component directly on canvas or use Arrow keys (Shift+Arrow = 10px) to move.
+            </p>
+          </div>
+        )}
       </div>
     </aside>
   );
