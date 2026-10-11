@@ -370,3 +370,24 @@ test('9. Heading level switching updates props, typography styles, and defaults 
   assert.equal(h6Root.styles.lineHeight, '1.4');
 });
 
+test('10. Auto-wrapping: Section and Container wrap text elements cleanly', () => {
+  const project = createBlankProject('user_test', 'Blank Test');
+  const root = project.pages[0].root;
+
+  const autoSection = createNode('Section', { name: 'Section' });
+  const autoContainer = createNode('Container', { name: 'Container' });
+  const heading = createNode('Heading', { props: { text: 'New Heading' } });
+
+  autoContainer.children.push(heading);
+  autoSection.children.push(autoContainer);
+  root.children.push(autoSection);
+
+  assert.equal(autoSection.type, 'Section');
+  assert.equal(autoContainer.type, 'Container');
+  assert.equal(heading.type, 'Heading');
+  assert.equal(autoSection.children[0].id, autoContainer.id);
+  assert.equal(autoContainer.children[0].id, heading.id);
+
+  const val = validateProject(project);
+  assert.equal(val.ok, true);
+});

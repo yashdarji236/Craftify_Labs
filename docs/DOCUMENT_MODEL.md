@@ -124,3 +124,51 @@ const MIGRATIONS = {
 ```
 
 When importing or loading a project, `migrateProject(doc)` runs sequentially from `doc.schemaVersion` up to `SCHEMA_VERSION`, ensuring backward compatibility across releases without breaking user documents.
+
+---
+
+## 6. Phase 3 Additions & Specifications
+
+### 6.1 Multi-Page Document Model
+Projects contain an array of `pages`. Each page has:
+- `id`: Unique string (`page_...`).
+- `name`: Display label (e.g. "About Us").
+- `path`: URL route path, starting with `/` (e.g. `/about-us`), generated and validated via `generateSlug()` and `validateSlug()`.
+- `isHome`: Boolean. Exactly one page must have `isHome: true` with path `/`.
+- `order`: Integer sequence index for navigation menus.
+- `root`: Root AST node of type `Page`.
+
+### 6.2 Typed Link Targets (`linkTarget`)
+Nodes supporting links (`Button`, `Link`, etc.) utilize a typed object `linkTarget`:
+```typescript
+type LinkTarget =
+  | { type: 'none' }
+  | { type: 'page'; pageId: string }
+  | { type: 'external'; url: string; newTab?: boolean }
+  | { type: 'anchor'; nodeId: string }
+  | { type: 'email'; email: string; subject?: string }
+  | { type: 'phone'; phone: string };
+```
+Resolution is computed via `resolveLinkTarget(target, project)`, generating safe `href` and `target` attributes.
+
+### 6.3 Responsive Style Overrides (`responsiveStyles`)
+Styles cascade downwards: `desktop` (base in `node.styles`) -> `tablet` (`node.responsiveStyles.tablet`) -> `mobile` (`node.responsiveStyles.mobile`).
+Overrides are resolved purely via `resolveStyles(node, breakpoint)`.
+Removing an override resets inheritance from the next broader viewport.
+
+### 6.4 Asset Metadata & Storage
+Images and media reference `assetId` in `assets`:
+```typescript
+interface Asset {
+  id: string;
+  name: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+  size: number; // <= 5MB per asset, <= 25MB total per project
+  blobKey: string;
+  width?: number;
+  height?: number;
+  alt?: string;
+  createdAt: string;
+}
+```
+Binary blobs are stored in IndexedDB `project_assets` store with magic bytes verification. SVGs are rejected to prevent stored XSS.

@@ -31,6 +31,12 @@ import {
   ChevronDown,
   Move,
   Image as ImageIcon,
+  Plus,
+  Square,
+  Circle,
+  Triangle,
+  Star,
+  ArrowUpRight,
 } from 'lucide-react';
 
 export function parseTranslate(transformStr) {
@@ -40,6 +46,205 @@ export function parseTranslate(transformStr) {
     return { x: parseFloat(match[1]) || 0, y: parseFloat(match[2]) || 0 };
   }
   return { x: 0, y: 0 };
+}
+
+export const DEFAULT_PAGE_HEIGHT = 800;
+
+/**
+ * Computes bounding boundaries so a moved component cannot escape the canvas artboard.
+ */
+export function computeCanvasBounds(nodeEl, currentTranslate, scale) {
+  const canvasEl =
+    nodeEl?.closest('[data-canvas-frame="true"]') ||
+    document.querySelector('[data-canvas-frame="true"]') ||
+    document.getElementById('craftify-artboard-frame');
+
+  const safeScale = scale && scale > 0 ? scale : 1;
+
+  if (!nodeEl || !canvasEl) {
+    return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  }
+
+  const nodeRect = nodeEl.getBoundingClientRect();
+  const canvasRect = canvasEl.getBoundingClientRect();
+
+  const currentLeft = (nodeRect.left - canvasRect.left) / safeScale;
+  const currentTop = (nodeRect.top - canvasRect.top) / safeScale;
+  const nodeWidth = nodeRect.width / safeScale;
+  const nodeHeight = nodeRect.height / safeScale;
+  const canvasWidth = canvasRect.width / safeScale;
+  const canvasHeight = Math.max(canvasRect.height / safeScale, canvasEl.offsetHeight || DEFAULT_PAGE_HEIGHT);
+
+  const baseLeft = currentLeft - (currentTranslate?.x || 0);
+  const baseTop = currentTop - (currentTranslate?.y || 0);
+
+  // Clamping boundaries so the component cannot exit the canvas boundaries
+  const minX = -baseLeft;
+  const maxX = Math.max(minX, canvasWidth - nodeWidth - baseLeft);
+  const minY = -baseTop;
+  const maxY = Math.max(minY, Math.max(canvasHeight, 10000) - nodeHeight - baseTop);
+
+  return {
+    minX: Math.min(minX, maxX),
+    maxX: Math.max(minX, maxX),
+    minY: Math.min(minY, maxY),
+    maxY: Math.max(minY, maxY),
+  };
+}
+
+export const SHAPE_OPTIONS = [
+  {
+    id: 'Rectangle',
+    label: 'Rectangle',
+    shortcut: 'R',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Rectangle',
+      styles: {
+        width: '240px',
+        height: '160px',
+        backgroundColor: '#3b82f6',
+        borderRadius: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+    },
+  },
+  {
+    id: 'Line',
+    label: 'Line',
+    shortcut: 'L',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Line',
+      styles: {
+        width: '240px',
+        height: '2px',
+        backgroundColor: '#ffffff',
+        display: 'flex',
+        alignItems: 'center',
+      },
+    },
+  },
+  {
+    id: 'Arrow',
+    label: 'Arrow',
+    shortcut: 'Shift+L',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Arrow',
+      styles: {
+        width: '200px',
+        height: '32px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        backgroundColor: 'transparent',
+      },
+    },
+  },
+  {
+    id: 'Ellipse',
+    label: 'Ellipse',
+    shortcut: 'O',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Ellipse',
+      styles: {
+        width: '160px',
+        height: '160px',
+        borderRadius: '9999px',
+        backgroundColor: '#8b5cf6',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+    },
+  },
+  {
+    id: 'Polygon',
+    label: 'Polygon',
+    shortcut: '',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Polygon',
+      styles: {
+        width: '160px',
+        height: '160px',
+        clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)',
+        backgroundColor: '#f59e0b',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+    },
+  },
+  {
+    id: 'Star',
+    label: 'Star',
+    shortcut: '',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Star',
+      styles: {
+        width: '160px',
+        height: '160px',
+        clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+        backgroundColor: '#ec4899',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+    },
+  },
+  {
+    id: 'Image',
+    label: 'Image/video...',
+    shortcut: 'Ctrl+Shift+K',
+    nodeType: 'Container',
+    createOverrides: {
+      name: 'Image',
+      styles: {
+        width: '280px',
+        height: '180px',
+        borderRadius: '12px',
+        backgroundImage: "url('/img2.jpg')",
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundColor: '#1f2937',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+    },
+  },
+];
+
+export function renderShapeIcon(id, className = 'w-3.5 h-3.5') {
+  switch (id) {
+    case 'Rectangle':
+      return <div className="w-3.5 h-3.5 border-2 border-current rounded-sm" />;
+    case 'Line':
+      return (
+        <div className="w-3.5 h-3.5 relative flex items-center justify-center">
+          <div className="w-3.5 h-[2px] bg-current -rotate-45" />
+        </div>
+      );
+    case 'Arrow':
+      return <ArrowUpRight className={className} />;
+    case 'Ellipse':
+      return <div className="w-3.5 h-3.5 border-2 border-current rounded-full" />;
+    case 'Polygon':
+      return <Triangle className={className} />;
+    case 'Star':
+      return <Star className={className} />;
+    case 'Image':
+      return <ImageIcon className={className} />;
+    default:
+      return <div className="w-3.5 h-3.5 border-2 border-current rounded-sm" />;
+  }
 }
 
 const CanvasContext = React.createContext({
@@ -82,7 +287,7 @@ function FloatingActionBar({ node, isRoot, onMoveStart }) {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="absolute -top-8 left-0 z-40 flex items-center gap-1 px-2 py-1 rounded-lg bg-[#111114] border border-white/20 shadow-xl text-white select-none text-xs"
+      className={`absolute ${currentTranslate.y < 36 ? 'top-1' : '-top-8'} left-1 z-40 flex items-center gap-1 px-2 py-1 rounded-lg bg-[#111114] border border-white/20 shadow-xl text-white select-none text-xs`}
     >
       {!isRoot && (
         <div
@@ -134,6 +339,52 @@ function FloatingActionBar({ node, isRoot, onMoveStart }) {
             className="p-1 rounded hover:bg-white/15 text-zinc-300 hover:text-white"
           >
             <ArrowDown className="w-3 h-3" />
+          </button>
+          <button
+            type="button"
+            title="Make width same as page (100%)"
+            onClick={(e) => {
+              e.stopPropagation();
+              updateStyles(node.id, {
+                width: '100%',
+                maxWidth: '100%',
+                left: node.styles?.position === 'absolute' ? '0px' : undefined,
+                transform: 'translate(0px, 0px)',
+              });
+            }}
+            className="px-1.5 py-0.5 rounded hover:bg-white/15 text-zinc-300 hover:text-white font-mono text-[9px] cursor-pointer"
+          >
+            Page Width
+          </button>
+          <button
+            type="button"
+            title="Make height same as page (100%)"
+            onClick={(e) => {
+              e.stopPropagation();
+              updateStyles(node.id, {
+                height: '100%',
+                top: node.styles?.position === 'absolute' ? '0px' : undefined,
+                transform: 'translate(0px, 0px)',
+              });
+            }}
+            className="px-1.5 py-0.5 rounded hover:bg-white/15 text-zinc-300 hover:text-white font-mono text-[9px] cursor-pointer"
+          >
+            Page Height
+          </button>
+          <button
+            type="button"
+            title={`Set to default height (${isRoot ? DEFAULT_PAGE_HEIGHT + 'px' : 'auto'})`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isRoot) {
+                updateStyles(node.id, { minHeight: `${DEFAULT_PAGE_HEIGHT}px`, height: undefined });
+              } else {
+                updateStyles(node.id, { height: 'auto' });
+              }
+            }}
+            className="px-1.5 py-0.5 rounded hover:bg-white/15 text-zinc-300 hover:text-white font-mono text-[9px] cursor-pointer"
+          >
+            Default Height
           </button>
           <button
             type="button"
@@ -267,11 +518,10 @@ function DropZoneIndicator({ parentId, index, active }) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`transition-all duration-150 relative ${
-        isOver
+      className={`transition-all duration-150 relative ${isOver
           ? 'h-7 bg-indigo-500/25 border-2 border-dashed border-indigo-400 rounded-xl my-2 shadow-[0_0_20px_rgba(99,102,241,0.6)] flex items-center justify-center text-[10px] font-mono font-bold text-indigo-200 uppercase tracking-wider'
           : 'h-2 hover:h-6 opacity-0 hover:opacity-100 bg-indigo-500/10 hover:border-2 hover:border-dashed hover:border-indigo-400 rounded-lg my-0.5 flex items-center justify-center text-[9px] font-mono font-semibold text-zinc-400'
-      }`}
+        }`}
     >
       <span>Drop Here</span>
     </div>
@@ -281,8 +531,10 @@ function DropZoneIndicator({ parentId, index, active }) {
 /**
  * Individual Node Renderer for the Canvas (Memoized).
  */
-const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) {
+const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false, pageId = null }) {
   const {
+    activePage,
+    setActivePage,
     selectedNodeId,
     setSelectedNodeId,
     hoveredNodeId,
@@ -297,6 +549,7 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
   } = useEditorStore();
 
   const { zoom, tool } = useContext(CanvasContext);
+  const resolvedStyle = resolveStyles(node, activeBreakpoint);
 
   const [isInlineEditing, setIsInlineEditing] = useState(false);
   const [inlineValue, setInlineValue] = useState('');
@@ -312,7 +565,7 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
   const isHovered = hoveredNodeId === node.id && !isSelected;
   const isResizing = Boolean(resizingInfo);
 
-  // Resize handler for handles with zoom-scale compensation
+  // Resize handler for handles with zoom-scale compensation & page snapping & auto-expanding page
   const handleResizeStart = (dir, e) => {
     if (!nodeRef.current) return;
     const rect = nodeRef.current.getBoundingClientRect();
@@ -321,6 +574,15 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     const startH = rect.height / scale;
     const startX = e.clientX;
     const startY = e.clientY;
+
+    const canvasEl =
+      nodeRef.current?.closest('[data-canvas-frame="true"]') ||
+      document.querySelector('[data-canvas-frame="true"]');
+    const artboardRect = canvasEl ? canvasEl.getBoundingClientRect() : null;
+    const artboardW = artboardRect ? Math.round(artboardRect.width / scale) : null;
+    const initialArtboardH = artboardRect ? Math.max(DEFAULT_PAGE_HEIGHT, Math.round(artboardRect.height / scale)) : DEFAULT_PAGE_HEIGHT;
+    let latestPageH = initialArtboardH;
+    const compTop = artboardRect ? Math.round((rect.top - artboardRect.top) / scale) : 0;
 
     setResizingInfo({ dir, startX, startY, startW, startH });
     setLiveSize({ width: Math.round(startW), height: Math.round(startH) });
@@ -337,8 +599,28 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       if (dir.includes('s')) newH = startH + deltaY;
       if (dir.includes('n')) newH = startH - deltaY;
 
+      // Snap to full page width if close to artboard width
+      if (artboardW && Math.abs(newW - artboardW) < 24) {
+        newW = artboardW;
+      }
+
       newW = Math.max(30, Math.round(newW));
       newH = Math.max(20, Math.round(newH));
+
+      // Calculate component's bottom position relative to the artboard
+      const compBottom = dir.includes('s')
+        ? compTop + newH
+        : Math.max(compTop + startH, compTop + newH);
+
+      // When increasing vertical size is going to overlap with / exceed page bottom,
+      // increase the size of the page vertically in real-time!
+      if (compBottom + 32 > latestPageH) {
+        const expandedH = Math.max(latestPageH, compBottom + 64);
+        latestPageH = expandedH;
+        if (canvasEl) {
+          canvasEl.style.minHeight = `${expandedH}px`;
+        }
+      }
 
       setLiveSize({ width: newW, height: newH });
     };
@@ -353,16 +635,41 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       const styleUpdates = {};
 
       if (dir.includes('e') || dir.includes('w')) {
-        const finalW = Math.max(30, Math.round(dir.includes('e') ? startW + deltaX : startW - deltaX));
-        styleUpdates.width = `${finalW}px`;
+        let finalW = Math.max(30, Math.round(dir.includes('e') ? startW + deltaX : startW - deltaX));
+        if (artboardW && Math.abs(finalW - artboardW) < 24) {
+          finalW = artboardW;
+          styleUpdates.width = '100%';
+          styleUpdates.maxWidth = '100%';
+          if (resolvedStyle.position === 'absolute') {
+            styleUpdates.left = '0px';
+          }
+        } else {
+          styleUpdates.width = `${finalW}px`;
+        }
       }
+
       if (dir.includes('s') || dir.includes('n')) {
-        const finalH = Math.max(20, Math.round(dir.includes('s') ? startH + deltaY : startH - deltaY));
+        let finalH = Math.max(20, Math.round(dir.includes('s') ? startH + deltaY : startH - deltaY));
         styleUpdates.height = `${finalH}px`;
+
+        if (dir.includes('n') && resolvedStyle.position === 'absolute') {
+          const startTop = parseInt(resolvedStyle.top, 10) || compTop;
+          styleUpdates.top = `${Math.max(0, Math.round(startTop - deltaY))}px`;
+        }
       }
 
       if (Object.keys(styleUpdates).length > 0) {
         updateStyles(node.id, styleUpdates);
+      }
+
+      // If page was expanded vertically, commit the new minHeight to the page root!
+      if (latestPageH > initialArtboardH) {
+        const targetPage = project?.pages?.find((p) => p.id === pageId) || activePage;
+        if (targetPage?.root?.id) {
+          updateStyles(targetPage.root.id, {
+            minHeight: `${latestPageH}px`,
+          });
+        }
       }
 
       setResizingInfo(null);
@@ -380,10 +687,23 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     e.preventDefault();
     e.stopPropagation();
 
+    if (pageId && activePage?.id !== pageId) {
+      setActivePage(pageId);
+    }
+
     const startX = e.clientX;
     const startY = e.clientY;
-    const currentTranslate = parseTranslate(node.styles?.transform);
+    const currentTranslate = parseTranslate(resolvedStyle?.transform || node.styles?.transform);
     const scale = (zoom || 100) / 100;
+    const bounds = computeCanvasBounds(nodeRef.current, currentTranslate, scale);
+
+    const canvasEl =
+      nodeRef.current?.closest('[data-canvas-frame="true"]') ||
+      document.querySelector('[data-canvas-frame="true"]');
+    const artboardRect = canvasEl ? canvasEl.getBoundingClientRect() : null;
+    const initialCanvasH = artboardRect ? Math.max(DEFAULT_PAGE_HEIGHT, Math.round(artboardRect.height / scale)) : DEFAULT_PAGE_HEIGHT;
+    let latestCanvasH = initialCanvasH;
+
     let moved = false;
 
     setIsMoving(true);
@@ -397,9 +717,27 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
         moved = true;
       }
 
-      const newX = Math.round(currentTranslate.x + deltaX);
-      const newY = Math.round(currentTranslate.y + deltaY);
-      setLiveTranslate({ x: newX, y: newY });
+      const rawX = Math.round(currentTranslate.x + deltaX);
+      const rawY = Math.round(currentTranslate.y + deltaY);
+
+      // Check if moving down overlaps with or exceeds the bottom of the page
+      if (nodeRef.current && canvasEl) {
+        const nRect = nodeRef.current.getBoundingClientRect();
+        const aRect = canvasEl.getBoundingClientRect();
+        const compCurrentTop = (nRect.top - aRect.top) / scale;
+        const compHeight = nRect.height / scale;
+        const projectedBottom = compCurrentTop + (rawY - currentTranslate.y) + compHeight;
+
+        if (projectedBottom + 32 > latestCanvasH) {
+          const expandedH = Math.max(latestCanvasH, Math.round(projectedBottom + 64));
+          latestCanvasH = expandedH;
+          canvasEl.style.minHeight = `${expandedH}px`;
+        }
+      }
+
+      const clampedX = Math.max(bounds.minX, Math.min(bounds.maxX, rawX));
+      const clampedY = Math.max(bounds.minY, rawY);
+      setLiveTranslate({ x: clampedX, y: clampedY });
     };
 
     const onMouseUp = (upEvent) => {
@@ -409,12 +747,23 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       if (moved) {
         const deltaX = (upEvent.clientX - startX) / scale;
         const deltaY = (upEvent.clientY - startY) / scale;
-        const finalX = Math.round(currentTranslate.x + deltaX);
-        const finalY = Math.round(currentTranslate.y + deltaY);
+        const rawX = Math.round(currentTranslate.x + deltaX);
+        const rawY = Math.round(currentTranslate.y + deltaY);
+        const finalX = Math.max(bounds.minX, Math.min(bounds.maxX, rawX));
+        const finalY = Math.max(bounds.minY, rawY);
 
         updateStyles(node.id, {
           transform: `translate(${finalX}px, ${finalY}px)`,
         });
+
+        if (latestCanvasH > initialCanvasH) {
+          const targetPage = project?.pages?.find((p) => p.id === pageId) || activePage;
+          if (targetPage?.root?.id) {
+            updateStyles(targetPage.root.id, {
+              minHeight: `${latestCanvasH}px`,
+            });
+          }
+        }
       }
 
       setIsMoving(false);
@@ -427,30 +776,64 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
 
   // Node mousedown: if user drags the selected node itself, move it!
   const handleNodeMouseDown = (e) => {
-    if (tool === 'hand' || isRoot || isInlineEditing || isResizing) return;
+    if (tool === 'hand' || tool === 'shape' || isRoot || isInlineEditing || isResizing) return;
     if (e.button !== 0) return;
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.closest('button')) return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (pageId && activePage?.id !== pageId) {
+      setActivePage(pageId);
+    }
 
     const startX = e.clientX;
     const startY = e.clientY;
-    const currentTranslate = parseTranslate(node.styles?.transform);
+    const currentTranslate = parseTranslate(resolvedStyle?.transform || node.styles?.transform);
     const scale = (zoom || 100) / 100;
+    const bounds = computeCanvasBounds(nodeRef.current, currentTranslate, scale);
+
+    const canvasEl =
+      nodeRef.current?.closest('[data-canvas-frame="true"]') ||
+      document.querySelector('[data-canvas-frame="true"]');
+    const artboardRect = canvasEl ? canvasEl.getBoundingClientRect() : null;
+    const initialCanvasH = artboardRect ? Math.max(DEFAULT_PAGE_HEIGHT, Math.round(artboardRect.height / scale)) : DEFAULT_PAGE_HEIGHT;
+    let latestCanvasH = initialCanvasH;
+
     let isDragMoving = false;
 
     const onMouseMove = (moveEvent) => {
       const deltaX = (moveEvent.clientX - startX) / scale;
       const deltaY = (moveEvent.clientY - startY) / scale;
 
-      if (!isDragMoving && (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4)) {
+      if (!isDragMoving && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
         isDragMoving = true;
         setIsMoving(true);
         setSelectedNodeId(node.id);
+        moveEvent.preventDefault();
+        window.getSelection()?.removeAllRanges();
       }
 
       if (isDragMoving) {
-        const newX = Math.round(currentTranslate.x + deltaX);
-        const newY = Math.round(currentTranslate.y + deltaY);
-        setLiveTranslate({ x: newX, y: newY });
+        moveEvent.preventDefault();
+        const rawX = Math.round(currentTranslate.x + deltaX);
+        const rawY = Math.round(currentTranslate.y + deltaY);
+
+        // Expand canvas vertically if moving down overlaps with page bottom
+        if (nodeRef.current && canvasEl) {
+          const nRect = nodeRef.current.getBoundingClientRect();
+          const aRect = canvasEl.getBoundingClientRect();
+          const compCurrentTop = (nRect.top - aRect.top) / scale;
+          const compHeight = nRect.height / scale;
+          const projectedBottom = compCurrentTop + (rawY - currentTranslate.y) + compHeight;
+
+          if (projectedBottom + 32 > latestCanvasH) {
+            const expandedH = Math.max(latestCanvasH, Math.round(projectedBottom + 64));
+            latestCanvasH = expandedH;
+            canvasEl.style.minHeight = `${expandedH}px`;
+          }
+        }
+
+        const clampedX = Math.max(bounds.minX, Math.min(bounds.maxX, rawX));
+        const clampedY = Math.max(bounds.minY, rawY);
+        setLiveTranslate({ x: clampedX, y: clampedY });
       }
     };
 
@@ -461,12 +844,23 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       if (isDragMoving) {
         const deltaX = (upEvent.clientX - startX) / scale;
         const deltaY = (upEvent.clientY - startY) / scale;
-        const finalX = Math.round(currentTranslate.x + deltaX);
-        const finalY = Math.round(currentTranslate.y + deltaY);
+        const rawX = Math.round(currentTranslate.x + deltaX);
+        const rawY = Math.round(currentTranslate.y + deltaY);
+        const finalX = Math.max(bounds.minX, Math.min(bounds.maxX, rawX));
+        const finalY = Math.max(bounds.minY, rawY);
 
         updateStyles(node.id, {
           transform: `translate(${finalX}px, ${finalY}px)`,
         });
+
+        if (latestCanvasH > initialCanvasH) {
+          const targetPage = project?.pages?.find((p) => p.id === pageId) || activePage;
+          if (targetPage?.root?.id) {
+            updateStyles(targetPage.root.id, {
+              minHeight: `${latestCanvasH}px`,
+            });
+          }
+        }
 
         setIsMoving(false);
         setLiveTranslate(null);
@@ -526,6 +920,12 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
 
   const handleClick = (e) => {
     e.stopPropagation();
+    if (tool === 'shape') {
+      return;
+    }
+    if (pageId && activePage?.id !== pageId) {
+      setActivePage(pageId);
+    }
     setSelectedNodeId(node.id);
   };
 
@@ -536,16 +936,26 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     }
   };
 
-  // Resolved responsive styles cascading: base -> tablet -> mobile
-  const resolvedStyle = resolveStyles(node, activeBreakpoint);
+  // Responsive visibility
   const isHiddenOnBreakpoint = resolvedStyle.display === 'none';
 
   const baseTranslate = parseTranslate(resolvedStyle.transform);
   const currentTranslate = liveTranslate || (resolvedStyle.transform ? baseTranslate : null);
 
+  const isTextElement = ['Heading', 'Text', 'Button', 'Link'].includes(node.type);
+
   const activeStyle = {
     boxSizing: 'border-box',
     overflowWrap: 'anywhere',
+    ...(isTextElement
+      ? {
+          width: resolvedStyle.width || 'fit-content',
+          maxWidth: resolvedStyle.maxWidth || '100%',
+          display: resolvedStyle.display || 'inline-block',
+          userSelect: isInlineEditing ? 'text' : 'none',
+          WebkitUserSelect: isInlineEditing ? 'text' : 'none',
+        }
+      : {}),
     ...resolvedStyle,
     ...(currentTranslate ? { transform: `translate(${currentTranslate.x}px, ${currentTranslate.y}px)` } : {}),
     ...(liveSize && (resizingInfo?.dir?.includes('e') || resizingInfo?.dir?.includes('w'))
@@ -567,7 +977,7 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     ? node.children.map((child, idx) => (
       <React.Fragment key={child.id}>
         <DropZoneIndicator parentId={node.id} index={idx} />
-        <InteractiveNode node={child} />
+        <InteractiveNode node={child} pageId={pageId} />
         {idx === node.children.length - 1 && (
           <DropZoneIndicator parentId={node.id} index={idx + 1} />
         )}
@@ -576,8 +986,12 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
     : null;
 
   // Empty container placeholder
+  const isShapeContainer =
+    Boolean(node.name && ['Rectangle', 'Ellipse', 'Polygon', 'Star', 'Arrow', 'Line', 'Image'].includes(node.name)) ||
+    Boolean(node.styles?.clipPath);
+
   const renderEmptyContainer =
-    isContainerNode && (!node.children || node.children.length === 0);
+    isContainerNode && !isShapeContainer && (!node.children || node.children.length === 0);
 
   // Outline class states
   const outlineClasses = isSelected
@@ -586,7 +1000,12 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       ? 'outline-dashed outline-1 outline-white/50 relative'
       : 'relative';
 
-  const cursorClass = isSelected && !isRoot && !isInlineEditing ? 'cursor-move' : '';
+  const cursorClass =
+    tool === 'shape'
+      ? 'cursor-crosshair'
+      : isSelected && !isRoot && !isInlineEditing
+        ? 'cursor-move'
+        : '';
   const animClasses = isResizing || isMoving ? 'relative' : `transition-all ${outlineClasses} ${cursorClass}`;
 
   const commonProps = {
@@ -634,7 +1053,16 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
   switch (node.type) {
     case 'Page':
       return (
-        <div {...commonProps} className={`w-full min-h-screen transition-all ${outlineClasses}`}>
+        <div
+          {...commonProps}
+          style={{
+            ...activeStyle,
+            minHeight: activeStyle?.minHeight && activeStyle.minHeight !== '100vh'
+              ? activeStyle.minHeight
+              : '100%',
+          }}
+          className={`w-full transition-all ${outlineClasses} relative overflow-hidden`}
+        >
           {isSelected && <FloatingActionBar node={node} isRoot={true} />}
           {renderEmptyContainer ? (
             <div className="p-12 text-center text-zinc-500 text-xs border border-dashed border-white/10 rounded-2xl m-6">
@@ -666,9 +1094,16 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       return (
         <div {...commonProps} className={animClasses}>
           {renderSelectionOverlays()}
+          {node.name === 'Arrow' && (!node.children || node.children.length === 0) && (
+            <div className="w-full h-full flex items-center justify-center text-white pointer-events-none p-1">
+              <svg className="w-full h-full min-h-[20px]" viewBox="0 0 100 24" fill="none" preserveAspectRatio="none">
+                <line x1="0" y1="12" x2="86" y2="12" stroke="currentColor" strokeWidth="3" />
+                <polygon points="84,4 100,12 84,20" fill="currentColor" />
+              </svg>
+            </div>
+          )}
           {renderEmptyContainer ? (
-            <div className="p-6 text-center text-zinc-500 text-xs border border-dashed border-white/10 rounded-lg">
-              Empty Container. Add content.
+            <div className="p-4 border border-dashed border-white/10 rounded-lg min-h-[48px] flex items-center justify-center">
               <DropZoneIndicator parentId={node.id} index={0} />
             </div>
           ) : (
@@ -722,7 +1157,7 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
         <HeadingTag
           {...commonProps}
           style={headingStyles}
-          className={animClasses}
+          className={`${animClasses} select-none`}
         >
           {renderSelectionOverlays()}
           {String(node.props?.text ?? 'Heading')}
@@ -749,7 +1184,7 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
       }
 
       return (
-        <p {...commonProps} className={animClasses}>
+        <p {...commonProps} className={`${animClasses} select-none`}>
           {renderSelectionOverlays()}
           {String(node.props?.content ?? '')}
         </p>
@@ -897,12 +1332,26 @@ const InteractiveNode = memo(function InteractiveNode({ node, isRoot = false }) 
 
 export default function CanvasRenderer() {
   const {
+    project,
     activePage,
+    setActivePage,
     selectedNodeId,
     setSelectedNodeId,
     activeBreakpoint,
     setActiveBreakpoint,
+    addNode,
+    updateStyles,
+    createPage,
+    duplicatePage,
+    deletePage,
   } = useEditorStore();
+
+  const pagesToRender =
+    project?.pages && project.pages.length > 0
+      ? project.pages
+      : activePage
+        ? [activePage]
+        : [];
 
   const containerRef = useRef(null);
   const zoomMenuRef = useRef(null);
@@ -911,10 +1360,141 @@ export default function CanvasRenderer() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
-  const [tool, setTool] = useState('select'); // 'select' | 'hand'
+  const [tool, setTool] = useState('select'); // 'select' | 'hand' | 'shape'
+  const [activeShape, setActiveShape] = useState('Rectangle');
+  const [showShapeMenu, setShowShapeMenu] = useState(false);
+  const shapeMenuRef = useRef(null);
+  const [showTextMenu, setShowTextMenu] = useState(false);
+  const textMenuRef = useRef(null);
   const [showGrid, setShowGrid] = useState(true);
   const [showZoomMenu, setShowZoomMenu] = useState(false);
-  const [showNavHint, setShowNavHint] = useState(true);
+  const [showNavHint, setShowNavHint] = useState(false);
+
+  const [drawingShape, setDrawingShape] = useState(null);
+
+  const activeShapeConfig =
+    SHAPE_OPTIONS.find((s) => s.id === activeShape) || SHAPE_OPTIONS[0];
+
+  const handleStartDrawShape = useCallback(
+    (e, pageId) => {
+      if (tool !== 'shape' || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const artboardEl = e.currentTarget.closest('[data-canvas-frame="true"]') || e.currentTarget;
+      const artboardRect = artboardEl.getBoundingClientRect();
+      const scale = (zoom || 100) / 100;
+
+      const artboardW = Math.round(artboardRect.width / scale);
+      const artboardH = Math.max(DEFAULT_PAGE_HEIGHT, Math.round(artboardRect.height / scale));
+
+      const rawStartX = Math.round((e.clientX - artboardRect.left) / scale);
+      const rawStartY = Math.round((e.clientY - artboardRect.top) / scale);
+      const startX = Math.max(0, Math.min(artboardW, rawStartX));
+      const startY = Math.max(0, Math.min(artboardH, rawStartY));
+
+      if (activePage?.id !== pageId) {
+        setActivePage(pageId);
+      }
+
+      setDrawingShape({
+        pageId,
+        startX,
+        startY,
+        x: startX,
+        y: startY,
+        width: 0,
+        height: 0,
+      });
+
+      let hasDragged = false;
+      let latestBox = { x: startX, y: startY, width: 0, height: 0 };
+
+      const onMouseMove = (moveEvent) => {
+        const rawX = Math.round((moveEvent.clientX - artboardRect.left) / scale);
+        const rawY = Math.round((moveEvent.clientY - artboardRect.top) / scale);
+        const currentX = Math.max(0, Math.min(artboardW, rawX));
+        const currentY = Math.max(0, Math.min(artboardH, rawY));
+
+        const x = Math.min(startX, currentX);
+        const y = Math.min(startY, currentY);
+        const width = Math.abs(currentX - startX);
+        const height = Math.abs(currentY - startY);
+
+        if (width > 4 || height > 4) {
+          hasDragged = true;
+        }
+
+        latestBox = { x, y, width, height };
+        setDrawingShape({
+          pageId,
+          startX,
+          startY,
+          x,
+          y,
+          width,
+          height,
+        });
+      };
+
+      const onMouseUp = () => {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        setDrawingShape(null);
+
+        const shapeConfig =
+          SHAPE_OPTIONS.find((s) => s.id === activeShape) || SHAPE_OPTIONS[0];
+
+        let finalW = 240;
+        let finalH = 160;
+        let finalX = startX;
+        let finalY = startY;
+
+        if (hasDragged && (latestBox.width >= 8 || latestBox.height >= 8)) {
+          finalW = Math.max(20, latestBox.width);
+          finalH = Math.max(activeShape === 'Line' ? 2 : 10, latestBox.height);
+          finalX = latestBox.x;
+          finalY = latestBox.y;
+        } else {
+          // Just clicked without dragging: use default dimensions centered at cursor
+          if (shapeConfig.createOverrides.styles?.width) {
+            finalW = parseInt(shapeConfig.createOverrides.styles.width, 10) || 240;
+          }
+          if (shapeConfig.createOverrides.styles?.height) {
+            finalH = parseInt(shapeConfig.createOverrides.styles.height, 10) || 160;
+          }
+          finalX = Math.max(0, Math.min(artboardW - finalW, startX - Math.round(finalW / 2)));
+          finalY = Math.max(0, Math.min(artboardH - finalH, startY - Math.round(finalH / 2)));
+        }
+
+        const overrides = {
+          ...shapeConfig.createOverrides,
+          styles: {
+            ...shapeConfig.createOverrides.styles,
+            position: 'absolute',
+            left: `${finalX}px`,
+            top: `${finalY}px`,
+            width: `${finalW}px`,
+            height: activeShape === 'Line' ? '2px' : `${finalH}px`,
+            transform: 'translate(0px, 0px)',
+            zIndex: 20,
+          },
+        };
+
+        const targetPage = project?.pages?.find((p) => p.id === pageId) || activePage;
+        if (finalY + finalH + 40 > artboardH && targetPage?.root?.id) {
+          const neededH = finalY + finalH + 64;
+          updateStyles(targetPage.root.id, { minHeight: `${neededH}px` });
+        }
+        addNode(shapeConfig.nodeType, targetPage?.root?.id, -1, overrides);
+        setTool('select');
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    },
+    [tool, zoom, activePage, setActivePage, activeShape, project, addNode, updateStyles]
+  );
 
   const deviceWidths = {
     desktop: { width: 'w-[1280px]', label: 'Desktop — 1280px' },
@@ -943,18 +1523,29 @@ export default function CanvasRenderer() {
     const availableW = Math.max(200, rect.width - 120);
     const availableH = Math.max(200, rect.height - 180);
 
-    const targetW =
+    const baseW =
       activeBreakpoint === 'desktop' ? 1280 : activeBreakpoint === 'tablet' ? 768 : 375;
+    const count = pagesToRender.length || 1;
+    const targetW = baseW * count + (count - 1) * 64;
     const targetH = 800;
 
     const scaleW = availableW / targetW;
     const scaleH = availableH / targetH;
     const scale = Math.min(scaleW, scaleH);
 
-    const optimalZoom = Math.min(150, Math.max(25, Math.round((scale * 100) / 5) * 5));
+    const optimalZoom = Math.min(150, Math.max(15, Math.round((scale * 100) / 5) * 5));
     setZoom(optimalZoom);
     setPan({ x: 0, y: 0 });
-  }, [activeBreakpoint]);
+  }, [activeBreakpoint, pagesToRender.length]);
+
+  // When a new page is added, auto-fit view so all side-by-side pages are comfortably visible
+  const prevPageCountRef = useRef(pagesToRender.length);
+  useEffect(() => {
+    if (pagesToRender.length > prevPageCountRef.current && prevPageCountRef.current > 0) {
+      handleFitToScreen();
+    }
+    prevPageCountRef.current = pagesToRender.length;
+  }, [pagesToRender.length, handleFitToScreen]);
 
   // Non-passive wheel event listener on containerRef for smooth zoom and pan
   useEffect(() => {
@@ -1002,20 +1593,20 @@ export default function CanvasRenderer() {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modKey = isMac ? e.metaKey : e.ctrlKey;
 
-      // Zoom In: Ctrl/Cmd + = or Ctrl/Cmd + +
-      if (modKey && (e.key === '=' || e.key === '+')) {
+      // Zoom In: + or = or Ctrl/Cmd + =
+      if ((e.key === '=' || e.key === '+') && !e.altKey) {
         e.preventDefault();
         handleZoomIn();
       }
 
-      // Zoom Out: Ctrl/Cmd + - or Ctrl/Cmd + _
-      if (modKey && (e.key === '-' || e.key === '_')) {
+      // Zoom Out: - or _ or Ctrl/Cmd + -
+      if ((e.key === '-' || e.key === '_') && !e.altKey) {
         e.preventDefault();
         handleZoomOut();
       }
 
-      // Reset Zoom (100%): Ctrl/Cmd + 0
-      if (modKey && e.key === '0') {
+      // Reset Zoom (100%): 0 or Ctrl/Cmd + 0
+      if (e.key === '0' && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         handleResetView();
       }
@@ -1037,6 +1628,60 @@ export default function CanvasRenderer() {
         e.preventDefault();
         setTool('select');
       }
+
+      // Shape tool: R (Rectangle)
+      if (!modKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        setActiveShape('Rectangle');
+        setTool('shape');
+      }
+
+      // Shape tool: O (Ellipse)
+      if (!modKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        setActiveShape('Ellipse');
+        setTool('shape');
+      }
+
+      // Shape tool: L (Line)
+      if (!modKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setActiveShape('Line');
+        setTool('shape');
+      }
+
+      // Shape tool: Shift + L (Arrow)
+      if (!modKey && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setActiveShape('Arrow');
+        setTool('shape');
+      }
+
+      // Shape tool: Ctrl/Cmd + Shift + K (Image/video)
+      if (modKey && e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setActiveShape('Image');
+        setTool('shape');
+      }
+
+      // Escape key cancels shape placement
+      if (e.key === 'Escape' && tool === 'shape') {
+        e.preventDefault();
+        setTool('select');
+      }
+
+      // Text tool shortcut: T (when not in input/textarea/editable)
+      if (
+        !modKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 't' &&
+        !['INPUT', 'TEXTAREA'].includes(e.target.tagName) &&
+        !e.target.isContentEditable
+      ) {
+        e.preventDefault();
+        addNode('Heading', null, -1, { createSectionAndContainer: true });
+      }
     };
 
     const handleKeyUp = (e) => {
@@ -1051,7 +1696,7 @@ export default function CanvasRenderer() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [handleZoomIn, handleZoomOut, handleResetView, handleFitToScreen]);
+  }, [handleZoomIn, handleZoomOut, handleResetView, handleFitToScreen, tool, addNode]);
 
   // Click outside zoom menu to close
   useEffect(() => {
@@ -1065,8 +1710,36 @@ export default function CanvasRenderer() {
     return () => window.removeEventListener('mousedown', handleClickOutside);
   }, [showZoomMenu]);
 
+  // Click outside shape menu to close
+  useEffect(() => {
+    if (!showShapeMenu) return;
+    const handleClickOutside = (e) => {
+      if (shapeMenuRef.current && !shapeMenuRef.current.contains(e.target)) {
+        setShowShapeMenu(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [showShapeMenu]);
+
+  // Click outside text menu to close
+  useEffect(() => {
+    if (!showTextMenu) return;
+    const handleClickOutside = (e) => {
+      if (textMenuRef.current && !textMenuRef.current.contains(e.target)) {
+        setShowTextMenu(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [showTextMenu]);
+
   // Pan dragging handler
   const handlePanMouseDown = (e) => {
+    if (tool === 'shape' && e.button === 0) {
+      return;
+    }
+
     const isMiddle = e.button === 1;
     const isHand = tool === 'hand' || isSpacePressed;
     const isBackgroundClick =
@@ -1114,7 +1787,9 @@ export default function CanvasRenderer() {
     ? 'cursor-grabbing'
     : isSpacePressed || tool === 'hand'
       ? 'cursor-grab'
-      : 'cursor-default';
+      : tool === 'shape'
+        ? 'cursor-crosshair'
+        : 'cursor-default';
 
   return (
     <CanvasContext.Provider value={{ zoom, tool }}>
@@ -1123,36 +1798,38 @@ export default function CanvasRenderer() {
         onMouseDown={handlePanMouseDown}
         data-canvas-bg="true"
         style={{
-          backgroundColor: '#141416',
+          backgroundColor: '#1e1e1e',
           backgroundImage: showGrid
-            ? 'radial-gradient(circle, rgba(255, 255, 255, 0.14) 1.2px, transparent 1.2px)'
+            ? 'radial-gradient(circle, rgba(255, 255, 255, 0.12) 1px, transparent 1px)'
             : 'none',
           backgroundSize: '24px 24px',
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
         className={`flex-1 overflow-hidden relative w-full h-full select-none ${cursorClass} transition-colors`}
       >
+        {/* Floating Shape Placement Mode Banner */}
+        {tool === 'shape' && (
+          <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2 rounded-xl bg-[#2c2c2c]/95 border border-[#383838] shadow-2xl text-xs text-white backdrop-blur-md animate-in fade-in slide-in-from-top-2 select-none">
+            <span className="w-2 h-2 rounded-full bg-[#0d99ff] animate-ping" />
+            <span>
+              Hold & drag on canvas to draw <strong>{activeShapeConfig.label}</strong> to size (or click to place)
+            </span>
+            <button
+              type="button"
+              onClick={() => setTool('select')}
+              className="ml-2 px-2 py-0.5 rounded-md bg-white/10 hover:bg-white/20 text-[10px] text-zinc-300 hover:text-white cursor-pointer font-mono"
+            >
+              Cancel (Esc)
+            </button>
+          </div>
+        )}
+
         {/* Full-canvas pan capture overlay when holding Spacebar or Hand Tool */}
         {(isSpacePressed || tool === 'hand') && (
           <div
             onMouseDown={handlePanMouseDown}
             className="absolute inset-0 z-30 cursor-grab active:cursor-grabbing"
           />
-        )}
-
-        {/* Helpful Figma Navigation Badge */}
-        {showNavHint && (
-          <div className="absolute top-4 left-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#1c1c21]/80 border border-white/10 backdrop-blur-md text-[11px] font-mono text-zinc-400 shadow-lg">
-            <span>💡 Space + Drag to Pan • Ctrl + Scroll to Zoom</span>
-            <button
-              type="button"
-              onClick={() => setShowNavHint(false)}
-              className="text-zinc-500 hover:text-zinc-300 ml-1 p-0.5 cursor-pointer"
-              title="Dismiss hint"
-            >
-              ×
-            </button>
-          </div>
         )}
 
         {/* Infinite Space Stage Wrapper */}
@@ -1165,122 +1842,418 @@ export default function CanvasRenderer() {
           }}
         >
           <div
-            className="pointer-events-auto flex flex-col items-center select-none"
+            className="pointer-events-auto flex items-start gap-16 select-none px-16"
             style={{
               transform: `scale(${zoom / 100})`,
               transformOrigin: 'top center',
               transition: isPanning ? 'none' : 'transform 0.15s cubic-bezier(0.2, 0, 0, 1)',
             }}
           >
-            {/* Figma Frame Header Pill */}
-            <div className={`w-full ${currentDevice.width} mb-3 flex items-center justify-between px-1 select-none`}>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono font-medium text-zinc-400 flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#1c1c21]/90 border border-white/10 backdrop-blur-md shadow-md">
-                  <span className="text-indigo-400 font-bold">#</span>
-                  <span className="text-zinc-200 font-semibold">{activePage?.title || 'Home Page'}</span>
-                  <span className="text-zinc-600">&bull;</span>
-                  <span className="text-zinc-400">{currentDevice.label}</span>
-                </span>
-              </div>
-              <div className="text-[10px] font-mono text-zinc-400 hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl bg-[#1c1c21]/80 border border-white/10 backdrop-blur-md">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Figma Infinite Canvas</span>
-                <span className="text-zinc-600">&bull;</span>
-                <span className="text-zinc-300 font-semibold">{zoom}%</span>
-              </div>
-            </div>
+            {pagesToRender.map((page) => {
+              const isActive = activePage?.id === page.id;
+              return (
+                <div
+                  key={page.id}
+                  onClick={() => {
+                    if (!isActive) {
+                      setActivePage(page.id);
+                    }
+                  }}
+                  className="flex flex-col items-center shrink-0 cursor-default"
+                >
+                  {/* Artboard Frame Header Pill */}
+                  <div className={`w-full ${currentDevice.width} mb-3 flex items-center justify-between px-1 select-none`}>
+                    <div className="flex items-center gap-2">
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActivePage(page.id);
+                          setSelectedNodeId(page.root?.id);
+                        }}
+                        className={`text-[11px] font-mono font-medium flex items-center gap-1.5 px-3 py-1 rounded-xl border backdrop-blur-md shadow-md transition-all cursor-pointer ${isActive
+                            ? 'bg-[#0d99ff]/20 border-[#0d99ff] text-white font-bold ring-2 ring-[#0d99ff]/30'
+                            : 'bg-[#2c2c2c]/90 border-[#383838] text-zinc-400 hover:text-white hover:border-white/20'
+                          }`}
+                      >
+                        <span className={isActive ? 'text-[#0d99ff] font-bold' : 'text-indigo-400 font-bold'}>#</span>
+                        <span className="text-zinc-200 font-semibold">{page.name}</span>
+                        {page.isHome && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-blue-500/30 text-blue-300 uppercase font-semibold">
+                            Home
+                          </span>
+                        )}
+                        <span className="text-zinc-600">&bull;</span>
+                        <span className="text-zinc-400">{currentDevice.label}</span>
+                      </div>
 
-            {/* Main Artboard Canvas Frame */}
-            <div
-              className={`${currentDevice.width} rounded-3xl shadow-[0_30px_90px_rgba(0,0,0,0.95)] border border-white/15 bg-[#09090b] min-h-[720px] relative transition-[width] duration-200`}
-            >
-              {activePage?.root ? (
-                <InteractiveNode node={activePage.root} isRoot={true} />
-              ) : (
-                <div className="p-16 text-center text-zinc-500 text-sm">
-                  No document tree loaded.
+                      {/* Header Quick Actions */}
+                      <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          title={`Set to default height (${DEFAULT_PAGE_HEIGHT}px)`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (page?.root) {
+                              updateStyles(page.root.id, { minHeight: `${DEFAULT_PAGE_HEIGHT}px`, height: undefined });
+                              if (onToast) onToast(`Page height reset to default (${DEFAULT_PAGE_HEIGHT}px)`, 'success');
+                            }
+                          }}
+                          className="px-1.5 py-0.5 rounded-lg bg-[#2c2c2c]/80 border border-[#383838] hover:bg-white/10 text-[9px] font-mono text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                        >
+                          Default Height
+                        </button>
+                        <button
+                          type="button"
+                          title="Duplicate page with same format"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            duplicatePage(page.id);
+                          }}
+                          className="p-1 rounded-lg bg-[#2c2c2c]/80 border border-[#383838] hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                        {!page.isHome && pagesToRender.length > 1 && (
+                          <button
+                            type="button"
+                            title="Delete page"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Delete page "${page.name}"?`)) {
+                                deletePage(page.id);
+                              }
+                            }}
+                            className="p-1 rounded-lg bg-[#2c2c2c]/80 border border-[#383838] hover:bg-rose-500/20 hover:border-rose-500/40 text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] font-mono text-zinc-400 hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl bg-[#2c2c2c]/80 border border-[#383838] backdrop-blur-md">
+                      <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`} />
+                      <span>{isActive ? 'Active Page' : 'Page'}</span>
+                    </div>
+                  </div>
+
+                  {/* Main Artboard Canvas Frame */}
+                  <div
+                    data-canvas-frame="true"
+                    data-page-id={page.id}
+                    style={{
+                      minHeight: page.root?.styles?.minHeight && page.root.styles.minHeight !== '100vh'
+                        ? page.root.styles.minHeight
+                        : `${DEFAULT_PAGE_HEIGHT}px`,
+                      ...(page.root?.styles?.height ? { height: page.root.styles.height } : {}),
+                    }}
+                    className={`${currentDevice.width} rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.8)] border ${isActive
+                        ? 'border-[#0d99ff]/70 ring-2 ring-[#0d99ff]/25'
+                        : 'border-[#383838] hover:border-[#484848]'
+                      } bg-[#09090b] relative transition-[width,border-color] duration-200 overflow-hidden ${tool === 'shape' ? 'cursor-crosshair' : ''
+                      }`}
+                  >
+                    {/* Active Shape Drawing Capture Overlay */}
+                    {tool === 'shape' && (
+                      <div
+                        data-shape-draw-overlay="true"
+                        onMouseDown={(e) => handleStartDrawShape(e, page.id)}
+                        className="absolute inset-0 z-50 cursor-crosshair select-none bg-transparent"
+                      />
+                    )}
+
+                    {/* Live Shape Draw Preview while user holds & drags cursor */}
+                    {drawingShape && drawingShape.pageId === page.id && (
+                      <div
+                        className="absolute pointer-events-none z-50 transition-none"
+                        style={{
+                          left: `${drawingShape.x}px`,
+                          top: `${drawingShape.y}px`,
+                          width: `${Math.max(2, drawingShape.width)}px`,
+                          height: `${activeShape === 'Line' ? 2 : Math.max(2, drawingShape.height)}px`,
+                        }}
+                      >
+                        {/* Inner shape styled preview box */}
+                        <div
+                          className="w-full h-full border-2 border-[#0d99ff] bg-[#0d99ff]/25 shadow-[0_0_20px_rgba(13,153,255,0.45)] relative flex items-center justify-center overflow-hidden"
+                          style={{
+                            borderRadius:
+                              activeShape === 'Ellipse'
+                                ? '9999px'
+                                : activeShape === 'Rectangle'
+                                  ? '8px'
+                                  : activeShape === 'Image'
+                                    ? '12px'
+                                    : '0px',
+                            clipPath:
+                              activeShape === 'Polygon'
+                                ? 'polygon(50% 0%, 0% 100%, 100% 100%)'
+                                : activeShape === 'Star'
+                                  ? 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
+                                  : undefined,
+                          }}
+                        >
+                          {activeShape === 'Arrow' && (
+                            <svg className="w-full h-full p-1" viewBox="0 0 100 24" fill="none" preserveAspectRatio="none">
+                              <line x1="0" y1="12" x2="86" y2="12" stroke="#0d99ff" strokeWidth="3" />
+                              <polygon points="84,4 100,12 84,20" fill="#0d99ff" />
+                            </svg>
+                          )}
+                          {activeShape === 'Line' && (
+                            <div className="w-full h-full bg-[#0d99ff]" />
+                          )}
+                          {activeShape === 'Image' && (
+                            <div className="text-[10px] font-mono text-white/90 bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm">
+                              Image
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Live Dimension Pill Badge (e.g. "240 × 160 px") */}
+                        <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-[#0d99ff] text-white text-[11px] font-mono font-bold shadow-[0_4px_12px_rgba(0,0,0,0.6)] whitespace-nowrap flex items-center gap-1">
+                          <span>{drawingShape.width}</span>
+                          <span className="opacity-70">&times;</span>
+                          <span>{activeShape === 'Line' ? 2 : drawingShape.height}</span>
+                          <span className="text-[9px] opacity-80">px</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {page.root ? (
+                      <InteractiveNode node={page.root} isRoot={true} pageId={page.id} />
+                    ) : (
+                      <div className="p-16 text-center text-zinc-500 text-sm">
+                        No document tree loaded.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* Floating Figma Bottom Toolbar */}
+        {/* Floating Figma Bottom Toolbar (Matches Screenshot) */}
         <div
           onClick={(e) => e.stopPropagation()}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-2 rounded-2xl bg-[#18181c]/90 border border-white/15 backdrop-blur-2xl shadow-[0_10px_35px_rgba(0,0,0,0.8)] text-zinc-300 select-none"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-2 py-1.5 rounded-2xl bg-[#2c2c2c]/95 border border-[#383838] backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.7)] text-zinc-300 select-none"
         >
-          {/* Tool Selector: Select (V) vs Hand (H) */}
-          <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
-            <button
-              type="button"
-              title="Select Tool (V)"
-              onClick={() => setTool('select')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                tool === 'select'
-                  ? 'bg-white text-black shadow-sm font-bold'
-                  : 'text-zinc-400 hover:text-white hover:bg-white/10'
+          {/* Tool 1: Move / Select (Blue active button in screenshot) */}
+          <button
+            type="button"
+            title="Move / Select (V)"
+            onClick={() => setTool('select')}
+            className={`p-2 rounded-xl transition-all cursor-pointer ${tool === 'select'
+                ? 'bg-[#0d99ff] text-white shadow-md'
+                : 'text-zinc-400 hover:text-white hover:bg-white/10'
               }`}
-            >
-              <MousePointer className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              title="Hand / Pan Tool (H) — Hold Space to pan anytime"
-              onClick={() => setTool('hand')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                tool === 'hand'
-                  ? 'bg-white text-black shadow-sm font-bold'
+          >
+            <MousePointer className="w-4 h-4 fill-current" />
+          </button>
+
+          {/* Tool 2: Frame / Section (#) */}
+          <button
+            type="button"
+            title="Add Section / Frame (F)"
+            onClick={() => addNode('Section')}
+            className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-xs font-mono font-bold"
+          >
+            <span>#</span>
+          </button>
+
+          {/* Tool 3: Shapes Tool with Dropdown Menu (Matches Figma Screenshot) */}
+          <div className="relative" ref={shapeMenuRef}>
+            <div
+              className={`flex items-center rounded-xl transition-all ${tool === 'shape'
+                  ? 'bg-[#0d99ff] text-white shadow-md'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
-              }`}
+                }`}
             >
-              <Hand className="w-3.5 h-3.5" />
-            </button>
+              <button
+                type="button"
+                title={`Place ${activeShapeConfig.label} (${activeShapeConfig.shortcut || 'Click canvas'})`}
+                onClick={() => {
+                  if (tool === 'shape') {
+                    setTool('select');
+                  } else {
+                    setTool('shape');
+                  }
+                }}
+                className="p-2 pr-1 rounded-l-xl cursor-pointer flex items-center justify-center transition-colors"
+              >
+                {renderShapeIcon(activeShape, 'w-3.5 h-3.5')}
+              </button>
+              <button
+                type="button"
+                title="Select Shape or Media"
+                onClick={() => setShowShapeMenu((prev) => !prev)}
+                className="py-2 pr-1.5 pl-0.5 rounded-r-xl cursor-pointer hover:bg-white/10 flex items-center justify-center transition-colors"
+              >
+                <ChevronDown className="w-3 h-3 text-current opacity-70 hover:opacity-100" />
+              </button>
+            </div>
+
+            {/* Dropdown Popup Menu (Matches User Screenshot) */}
+            {showShapeMenu && (
+              <div className="absolute bottom-full mb-2.5 left-0 bg-[#1e1e1e] border border-[#333333] rounded-xl shadow-2xl p-1.5 min-w-[210px] z-50 select-none animate-in fade-in duration-100 text-zinc-300">
+                {SHAPE_OPTIONS.map((shape) => {
+                  const isCurrent = activeShape === shape.id;
+                  return (
+                    <button
+                      key={shape.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveShape(shape.id);
+                        setTool('shape');
+                        setShowShapeMenu(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${isCurrent
+                          ? 'bg-[#0d99ff] text-white font-medium shadow-sm'
+                          : 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                        }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {/* Checkmark icon for active selection */}
+                        <div className="w-3.5 flex items-center justify-center">
+                          {isCurrent ? (
+                            <Check className="w-3.5 h-3.5 text-white stroke-[2.5]" />
+                          ) : null}
+                        </div>
+                        {/* Shape Icon */}
+                        <div className="w-4 h-4 flex items-center justify-center">
+                          {renderShapeIcon(shape.id, 'w-3.5 h-3.5')}
+                        </div>
+                        {/* Label */}
+                        <span className="font-normal">{shape.label}</span>
+                      </div>
+
+                      {/* Keyboard shortcut label */}
+                      {shape.shortcut && (
+                        <span
+                          className={`text-[10px] font-mono tracking-tight ml-3 ${isCurrent ? 'text-white/80' : 'text-zinc-500'
+                            }`}
+                        >
+                          {shape.shortcut}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="h-4 w-px bg-white/10 mx-0.5" />
+          {/* Tool 5: Text */}
+          <div className="relative flex items-center" ref={textMenuRef}>
+            <div className="flex items-center rounded-xl hover:bg-white/10 transition-colors">
+              <button
+                type="button"
+                title="Add Heading with Section & Container (T)"
+                onClick={() => addNode('Heading', null, -1, { createSectionAndContainer: true })}
+                className="p-2 pr-1 rounded-l-xl text-zinc-400 hover:text-white transition-colors cursor-pointer text-xs font-bold"
+              >
+                <span>T</span>
+              </button>
+              <button
+                type="button"
+                title="Select Text Type"
+                onClick={() => setShowTextMenu((prev) => !prev)}
+                className="py-2 pr-1.5 pl-0.5 rounded-r-xl cursor-pointer text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <ChevronDown className="w-3 h-3 text-current opacity-70 hover:opacity-100" />
+              </button>
+            </div>
+
+            {/* Dropdown for Heading / Text */}
+            {showTextMenu && (
+              <div className="absolute bottom-full mb-2.5 left-0 bg-[#1e1e1e] border border-[#333333] rounded-xl shadow-2xl p-1.5 min-w-[200px] z-50 select-none text-zinc-300">
+                <button
+                  type="button"
+                  onClick={() => {
+                    addNode('Heading', null, -1, { createSectionAndContainer: true });
+                    setShowTextMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer text-left"
+                >
+                  <span className="font-bold font-mono text-white text-xs w-4 text-center">H</span>
+                  <div>
+                    <span className="font-medium text-white block">Heading</span>
+                    <span className="text-[10px] text-zinc-500 block">With Section & Container</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    addNode('Text', null, -1, { createSectionAndContainer: true });
+                    setShowTextMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer text-left"
+                >
+                  <span className="font-bold text-white text-xs w-4 text-center">¶</span>
+                  <div>
+                    <span className="font-medium text-white block">Paragraph / Text</span>
+                    <span className="text-[10px] text-zinc-500 block">With Section & Container</span>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Tool 6: Hand Tool */}
+          <button
+            type="button"
+            title="Hand / Pan Tool (H)"
+            onClick={() => setTool('hand')}
+            className={`p-2 rounded-xl transition-all cursor-pointer ${tool === 'hand'
+                ? 'bg-[#0d99ff] text-white shadow-md'
+                : 'text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
+          >
+            <Hand className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Divider */}
+          <div className="h-5 w-px bg-white/15 mx-1" />
 
           {/* Device Viewport Selector */}
-          <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
+          <div className="flex items-center bg-black/30 p-0.5 rounded-xl border border-white/5 gap-0.5">
             <button
               type="button"
-              title="Desktop View (1280px)"
+              title="Desktop (1280px)"
               onClick={() => setActiveBreakpoint('desktop')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                activeBreakpoint === 'desktop'
-                  ? 'bg-white text-black shadow-sm font-bold'
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${activeBreakpoint === 'desktop'
+                  ? 'bg-white text-black font-bold shadow-sm'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
-              }`}
+                }`}
             >
               <Monitor className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              title="Tablet View (768px)"
+              title="Tablet (768px)"
               onClick={() => setActiveBreakpoint('tablet')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                activeBreakpoint === 'tablet'
-                  ? 'bg-white text-black shadow-sm font-bold'
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${activeBreakpoint === 'tablet'
+                  ? 'bg-white text-black font-bold shadow-sm'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
-              }`}
+                }`}
             >
               <Tablet className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              title="Mobile View (375px)"
+              title="Mobile (375px)"
               onClick={() => setActiveBreakpoint('mobile')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                activeBreakpoint === 'mobile'
-                  ? 'bg-white text-black shadow-sm font-bold'
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${activeBreakpoint === 'mobile'
+                  ? 'bg-white text-black font-bold shadow-sm'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
-              }`}
+                }`}
             >
               <Smartphone className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="h-4 w-px bg-white/10 mx-0.5" />
+          {/* Divider */}
+          <div className="h-5 w-px bg-white/15 mx-1" />
 
           {/* Zoom Controls */}
           <div className="flex items-center gap-1">
@@ -1297,18 +2270,18 @@ export default function CanvasRenderer() {
             <div className="relative" ref={zoomMenuRef}>
               <button
                 type="button"
-                title="Zoom Presets & Options"
+                title="Zoom Presets"
                 onClick={() => setShowZoomMenu((prev) => !prev)}
-                className="flex items-center gap-1 text-[11px] font-mono font-semibold px-2 py-1 rounded-lg hover:bg-white/10 text-zinc-300 min-w-[58px] justify-center transition-colors cursor-pointer"
+                className="flex items-center gap-1 text-[11px] font-mono font-semibold px-2 py-1 rounded-lg hover:bg-white/10 text-zinc-300 min-w-[54px] justify-center transition-colors cursor-pointer"
               >
                 <span>{zoom}%</span>
                 <ChevronDown className="w-3 h-3 text-zinc-400" />
               </button>
 
               {showZoomMenu && (
-                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#18181c]/95 border border-white/15 rounded-2xl shadow-2xl p-1.5 min-w-[140px] z-50 text-xs backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#2c2c2c] border border-[#383838] rounded-xl shadow-2xl p-1.5 min-w-[140px] z-50 text-xs text-zinc-200">
                   <div className="text-[10px] uppercase font-mono text-zinc-500 px-2 py-1 font-bold">Zoom Presets</div>
-                  {[200, 150, 125, 100, 75, 50, 25].map((preset) => (
+                  {[200, 150, 100, 75, 50, 25].map((preset) => (
                     <button
                       key={preset}
                       type="button"
@@ -1316,14 +2289,12 @@ export default function CanvasRenderer() {
                         setZoom(preset);
                         setShowZoomMenu(false);
                       }}
-                      className={`w-full text-left px-2.5 py-1.5 rounded-xl flex items-center justify-between font-mono text-xs transition-colors cursor-pointer ${
-                        zoom === preset
-                          ? 'bg-indigo-600 text-white font-semibold shadow-sm'
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg font-mono text-xs transition-colors cursor-pointer ${zoom === preset
+                          ? 'bg-[#0d99ff] text-white font-semibold'
                           : 'text-zinc-300 hover:bg-white/10'
-                      }`}
+                        }`}
                     >
-                      <span>{preset}%</span>
-                      {preset === 100 && <span className="text-[9px] text-zinc-400">100%</span>}
+                      {preset}%
                     </button>
                   ))}
                   <div className="h-px bg-white/10 my-1" />
@@ -1333,10 +2304,9 @@ export default function CanvasRenderer() {
                       handleFitToScreen();
                       setShowZoomMenu(false);
                     }}
-                    className="w-full text-left px-2.5 py-1.5 rounded-xl font-mono text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg font-mono text-xs text-zinc-300 hover:bg-white/10 cursor-pointer"
                   >
-                    <span>Fit to screen</span>
-                    <span className="text-[9px] text-zinc-500">Shift+1</span>
+                    Fit to screen
                   </button>
                   <button
                     type="button"
@@ -1344,10 +2314,9 @@ export default function CanvasRenderer() {
                       handleResetView();
                       setShowZoomMenu(false);
                     }}
-                    className="w-full text-left px-2.5 py-1.5 rounded-xl font-mono text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg font-mono text-xs text-zinc-300 hover:bg-white/10 cursor-pointer"
                   >
-                    <span>Reset view</span>
-                    <span className="text-[9px] text-zinc-500">Ctrl+0</span>
+                    Reset (100%)
                   </button>
                 </div>
               )}
@@ -1361,41 +2330,84 @@ export default function CanvasRenderer() {
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
+          </div>
+        </div>
 
+        {/* Floating Canvas Controls (Bottom Right) */}
+        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2">
+          {/* Dedicated Zoom Widget */}
+          <div className="flex items-center gap-1 px-2 py-1 rounded-2xl bg-[#2c2c2c]/95 border border-[#383838] backdrop-blur-2xl shadow-[0_8px_30px_rgba(0,0,0,0.6)] text-zinc-300 select-none">
             <button
               type="button"
-              title="Fit to Screen (Shift+1)"
+              title="Zoom Out (-)"
+              onClick={handleZoomOut}
+              className="p-1.5 rounded-xl hover:bg-white/10 hover:text-white transition-colors cursor-pointer text-zinc-400"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              title="Click to reset zoom (100%)"
+              onClick={handleResetView}
+              className="text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded-lg hover:bg-white/10 hover:text-white transition-colors cursor-pointer min-w-[44px] text-center"
+            >
+              {zoom}%
+            </button>
+            <button
+              type="button"
+              title="Zoom In (+)"
+              onClick={handleZoomIn}
+              className="p-1.5 rounded-xl hover:bg-white/10 hover:text-white transition-colors cursor-pointer text-zinc-400"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <div className="w-px h-4 bg-white/15 mx-0.5" />
+            <button
+              type="button"
+              title="Fit to Screen (Shift + 1)"
               onClick={handleFitToScreen}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              className="p-1.5 rounded-xl hover:bg-white/10 hover:text-white transition-colors cursor-pointer text-zinc-400"
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
+          </div>
+
+          {/* Help navigation modal / trigger */}
+          <div className="relative">
+            {showNavHint && (
+              <div className="absolute bottom-full mb-3 right-0 bg-[#252528] border border-[#383838] p-3.5 rounded-2xl shadow-2xl text-xs text-zinc-300 w-64 space-y-2.5 animate-in fade-in slide-in-from-bottom-2 select-none">
+                <div className="flex items-center justify-between font-bold text-white text-[11px]">
+                  <span>Craftify Canvas Navigation</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowNavHint(false)}
+                    className="text-zinc-500 hover:text-white cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <ul className="text-[10px] space-y-1.5 text-zinc-400 font-mono">
+                  <li>• <strong className="text-zinc-200">Pan Canvas:</strong> Space + Drag or Middle Click</li>
+                  <li>• <strong className="text-zinc-200">Zoom In / Out:</strong> + / - or Ctrl + MouseWheel</li>
+                  <li>• <strong className="text-zinc-200">Fit to Screen:</strong> Shift + 1</li>
+                  <li>• <strong className="text-zinc-200">Reset Zoom:</strong> 0 or click percentage</li>
+                  <li>• <strong className="text-zinc-200">Move Element:</strong> Drag element in canvas</li>
+                  <li>• <strong className="text-zinc-200">Edit Text:</strong> Double-click text</li>
+                  <li>• <strong className="text-zinc-200">Duplicate:</strong> Ctrl + D</li>
+                  <li>• <strong className="text-zinc-200">Undo / Redo:</strong> Ctrl + Z / Ctrl + Y</li>
+                </ul>
+              </div>
+            )}
 
             <button
               type="button"
-              title="Reset & Center View (Ctrl+0)"
-              onClick={handleResetView}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              onClick={() => setShowNavHint(!showNavHint)}
+              title="Craftify Navigation & Shortcuts Help"
+              className="w-8 h-8 rounded-full bg-[#2c2c2c] hover:bg-[#383838] border border-white/15 flex items-center justify-center text-zinc-300 hover:text-white font-mono font-bold text-xs shadow-lg transition-all cursor-pointer"
             >
-              <RotateCcw className="w-3 h-3" />
+              <span>?</span>
             </button>
           </div>
-
-          <div className="h-4 w-px bg-white/10 mx-0.5" />
-
-          {/* Toggle Dot Grid */}
-          <button
-            type="button"
-            title="Toggle Figma Dot Grid"
-            onClick={() => setShowGrid(!showGrid)}
-            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-              showGrid
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <GridIcon className="w-3.5 h-3.5" />
-          </button>
         </div>
       </section>
     </CanvasContext.Provider>

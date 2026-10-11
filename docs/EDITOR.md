@@ -101,8 +101,57 @@ The Properties Inspector provides schema-driven controls:
 
 ---
 
-## 8. Known Limitations
+## 8. Figma 2024 UI Shell Structure
 
-- **Local Storage Bound**: Projects are currently stored in local browser IndexedDB (`craftify_builder_db`). Full cloud autosave will be connected in Phase 5.
-- **Single-Page Editing**: Canvas currently edits the primary home page (`/`). Multi-page routing and management UI will be added in Phase 3.
-- **Responsive Breakpoint Controls**: Tablet and mobile responsive overrides are reserved in the document schema (`responsiveStyles`) and will be exposed in Phase 3.
+The Visual Editor adheres to the modern Figma 2024 design system:
+
+```
+┌────┬───────────────────────┬──────────────────────────────────────────┬────────────────────────┐
+│ ❖  │ Project Title   Drafts│                                          │  Y v    ▷   [ Share ]  │
+│────│───────────────────────│                                          │────────────────────────│
+│File│ Pages           Q  +  │                                          │ Design  Prototype 1280 │
+│    │  Page 1               │             Infinite Canvas              │────────────────────────│
+│Agts│───────────────────────│                (#1e1e1e)                 │ Page #1E1E1E 100%   👁  │
+│    │ Layers           AST  │                                          │ Styles               + │
+│Asst│  ❖ Page               │                                          │ Export               + │
+│    │    ❖ Section          │                                          │────────────────────────│
+│Tool│      ❖ Container      │                                          │ Component Inspector    │
+│    │        ❖ Heading      │                                          │ (Schema Properties)    │
+│Var │        ❖ Text         │                                          │                        │
+│    │                       │  ┌────────────────────────────────────┐  │ Bring 3rd-Party Agents │
+│    │                       │  │ ↖  #  □  ✎  T  ○  㗊 │ ⊞ 🗔 📱 │ 100% │  │ [ Set up agents ]      │
+│ ⤹  │                       │  └────────────────────────────────────┘  │                        │
+└────┴───────────────────────┴──────────────────────────────────────────┴────────────────────────┘
+```
+
+1. **Left Icon Rail (48px)**:
+   - Top `❖` Figma menu button (opens dashboard navigation, save, import/export, undo/redo).
+   - Icons: `File` (Pages & Layers), `Agents` (Component Palette), `Assets` (Asset Library & Uploads), `Tools` (Health Checks & Warnings), `Variables` (Theme tokens).
+   - Bottom sidebar collapse/expand toggle.
+
+2. **Left Drawer Panel (260px)**:
+   - Displays context for the selected rail tab.
+   - For `File`: Project name, `Drafts Free` badge, searchable `Pages` manager with inline creation, and AST `Layers` tree with reordering, renaming, duplication, and visibility toggling.
+
+3. **Infinite Canvas**:
+   - `#1e1e1e` viewport background.
+   - Interactive zoom (`10%` to `400%`, presets, fit-to-screen) and infinite pan via middle-mouse drag or Hand tool (`H` / Spacebar).
+   - Movable component dragging with CSS transforms and visual alignment guides.
+   - **Floating Bottom Dock**: Centered floating pill containing selection tools (`↖`, `#`, `□`, `✎`, `T`, `○`, `㗊`), responsive breakpoint modes (`Desktop 1280px`, `Tablet 768px`, `Mobile 375px`), zoom controls, and help button (`?`) at bottom right.
+
+4. **Right Inspector (288px)**:
+   - Top bar: Profile avatar (`Y v`), Play preview button (`▷`), blue `Share` button.
+   - Tabs: `Design` and `Prototype` with active breakpoint indicator.
+   - `Page` section with `#1E1E1E 100%` color swatch and visibility toggle.
+   - `Styles` `+` and `Export` `+` collapsible sections.
+   - Schema-driven property controls with responsive override badges (amber pill for overrides, reset action).
+   - Bottom "Bring third-party agents to Figma" card with "Set up agents" button.
+
+---
+
+## 9. Responsive Overrides & Breakpoints
+
+- Breakpoints: Desktop (1280px), Tablet (768px), Mobile (375px).
+- Cascading: Styles cascade downward Desktop -> Tablet -> Mobile.
+- Breakpoint-specific overrides are saved in `node.responsiveStyles[breakpoint]`.
+- Resetting an override removes the key from the breakpoint object, restoring inherited base values.

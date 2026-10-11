@@ -33,7 +33,6 @@ const PALETTE_ICONS = {
 // Available components for Phase 2
 const ACTIVE_COMPONENTS = [
   { type: 'Section', desc: 'Full-width landmark section' },
-  { type: 'Container', desc: 'Flexbox layout wrapper' },
   { type: 'Grid', desc: 'Multi-column grid container' },
   { type: 'Heading', desc: 'Semantic h1-h6 title' },
   { type: 'Text', desc: 'Body paragraph text' },
@@ -79,7 +78,13 @@ export default function ComponentPalette() {
               key={type}
               draggable
               onDragStart={(e) => handleDragStart(e, type)}
-              onClick={() => addNode(type)}
+              onClick={() => {
+                if (['Heading', 'Text'].includes(type)) {
+                  addNode(type, null, -1, { createSectionAndContainer: true });
+                } else {
+                  addNode(type);
+                }
+              }}
               title={`Add ${def.label} (${desc})`}
               className="group relative p-2.5 rounded-xl bg-[#0e0e11]/80 hover:bg-white/10 border border-white/5 hover:border-white/20 flex items-center gap-2.5 text-xs text-zinc-300 cursor-grab active:cursor-grabbing transition-all shadow-sm"
             >
@@ -102,7 +107,11 @@ export default function ComponentPalette() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  addNode(type);
+                  if (['Heading', 'Text'].includes(type)) {
+                    addNode(type, null, -1, { createSectionAndContainer: true });
+                  } else {
+                    addNode(type);
+                  }
                 }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded-md bg-white/10 hover:bg-white/20 text-white transition-opacity shrink-0 cursor-pointer"
                 title="Add to canvas"

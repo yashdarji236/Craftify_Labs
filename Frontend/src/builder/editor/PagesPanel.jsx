@@ -36,6 +36,7 @@ export default function PagesPanel() {
   const [isCreating, setIsCreating] = useState(false);
   const [newPageName, setNewPageName] = useState('');
   const [newPagePath, setNewPagePath] = useState('');
+  const [useSameFormat, setUseSameFormat] = useState(true);
   const [editingSettingsPageId, setEditingSettingsPageId] = useState(null);
   const [pageToDelete, setPageToDelete] = useState(null);
 
@@ -69,7 +70,9 @@ export default function PagesPanel() {
     e.preventDefault();
     if (!newPageName.trim()) return;
 
-    const res = createPage(newPageName.trim(), newPagePath.trim() || null);
+    const res = createPage(newPageName.trim(), newPagePath.trim() || null, {
+      copyFormat: useSameFormat,
+    });
     if (res?.ok) {
       setNewPageName('');
       setNewPagePath('');
@@ -145,6 +148,16 @@ export default function PagesPanel() {
               className="w-full px-2.5 py-1.5 mt-0.5 rounded-lg bg-black/50 border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
             />
           </div>
+
+          <label className="flex items-center gap-2 cursor-pointer text-[11px] text-zinc-400 hover:text-zinc-200 select-none pt-1">
+            <input
+              type="checkbox"
+              checked={useSameFormat}
+              onChange={(e) => setUseSameFormat(e.target.checked)}
+              className="rounded bg-black/40 border-white/20 text-indigo-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+            />
+            <span>Same format as {pages[0]?.name || 'Page 1'}</span>
+          </label>
 
           <div className="flex items-center justify-end gap-2 pt-1">
             <button

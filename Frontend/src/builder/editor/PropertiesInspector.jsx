@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { useEditorStore } from '../store/editorContext.jsx';
 import {
   isSafeUrl,
@@ -32,8 +33,12 @@ import {
   Columns,
   Grid as GridIcon,
   Check,
+  Play,
+  Plus,
+  X,
+  ChevronDown,
 } from 'lucide-react';
-import { parseTranslate } from './CanvasRenderer.jsx';
+import { parseTranslate, computeCanvasBounds } from './CanvasRenderer.jsx';
 
 /**
  * Calculates WCAG relative luminance and contrast ratio.
@@ -240,6 +245,7 @@ function LinkTargetControl({ linkTarget, onChange, pages = [] }) {
 export default function PropertiesInspector() {
   const {
     selectedNode,
+    activePage,
     project,
     activeBreakpoint,
     updateProps,
@@ -312,6 +318,21 @@ export default function PropertiesInspector() {
 
   const handleStyleChange = (key, value) => {
     updateStyles(id, { [key]: value }, true);
+
+    // If height is increased and overlaps or exceeds page height, auto-expand page minHeight
+    if (key === 'height' && type !== 'Page' && activePage?.root) {
+      const numH = parseInt(value, 10);
+      if (!isNaN(numH) && numH > 0 && typeof value === 'string' && value.includes('px')) {
+        const pageMinH = parseInt(activePage.root.styles?.minHeight, 10) || 800;
+        const compTop = parseInt(effectiveStyles.top, 10) || 0;
+        const compBottom = compTop + numH;
+        if (compBottom + 32 > pageMinH) {
+          updateStyles(activePage.root.id, {
+            minHeight: `${compBottom + 64}px`,
+          });
+        }
+      }
+    }
   };
 
   const handleResetOverride = (key) => {
@@ -324,24 +345,159 @@ export default function PropertiesInspector() {
   const contrast = getContrastRatio(textColor, bgColor);
   const isLowContrast = contrast !== null && contrast < 4.5;
 
+  const { user } = useAuth();
+  const userInitial = user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'C';
+
   const uploadedAssets = project?.assets || [];
+  const [inspectorTab, setInspectorTab] = useState('design');
+  const [showAgentBanner, setShowAgentBanner] = useState(true);
+
+  const handleExportJson = () => {
+    if (!project) return;
+    try {
+      const jsonString = JSON.stringify(project, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const filename = `${(project.project?.name || 'project').toLowerCase().replace(/\s+/g, '_')}_document.json`;
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {}
+  };
+
+  const handleShare = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(window.location.href);
+    }
+  };
 
   return (
-    <aside className="w-80 border-l border-white/10 bg-[#111114]/90 backdrop-blur-2xl flex flex-col shrink-0 z-20 select-none overflow-y-auto">
-      {/* Header Badge */}
-      <div className="p-3.5 border-b border-white/10 flex items-center justify-between text-xs font-semibold text-zinc-200 sticky top-0 bg-[#111114]/95 backdrop-blur-md z-10">
+    <aside className="w-72 bg-[#2c2c2c] border-l border-[#383838] flex flex-col shrink-0 z-20 select-none overflow-y-auto text-zinc-300">
+      {/* 1. TOP BAR: User Avatar pill, Preview Play button, Blue Share button */}
+      <div className="p-2.5 border-b border-[#383838] flex items-center justify-between bg-[#2c2c2c] sticky top-0 z-30">
+        <div
+          title={user?.email ? `Logged in as ${user.email}` : 'Craftify Account'}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-black/30 border border-white/10 hover:bg-black/50 cursor-pointer"
+        >
+          <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">
+            {userInitial}
+          </div>
+          <ChevronDown className="w-3 h-3 text-zinc-400" />
+        </div>
+
         <div className="flex items-center gap-2">
-          <Sliders className="w-3.5 h-3.5 text-zinc-300" />
-          <span>Properties</span>
+          <button
+            type="button"
+            title="Preview Site"
+            onClick={handleExportJson}
+            className="p-1.5 rounded-lg text-zinc-300 hover:text-white hover:bg-white/10 cursor-pointer"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+          </button>
+
+          <button
+            type="button"
+            title="Share & Export"
+            onClick={handleShare}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0d99ff] hover:bg-[#0b86e0] text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
+          >
+            <span>Share</span>
+          </button>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-zinc-300">
-            {type}
-          </span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 capitalize">
-            {activeBreakpoint}
-          </span>
+      </div>
+
+      {/* 2. TABS BAR: Design | Prototype & Breakpoint (Matches Figma Screenshot) */}
+      <div className="px-3 py-2 border-b border-[#383838] flex items-center justify-between text-xs font-semibold text-zinc-400">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setInspectorTab('design')}
+            className={`pb-1 border-b-2 transition-all cursor-pointer ${
+              inspectorTab === 'design'
+                ? 'text-white border-white font-bold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Design
+          </button>
+          <button
+            type="button"
+            onClick={() => setInspectorTab('prototype')}
+            className={`pb-1 border-b-2 transition-all cursor-pointer ${
+              inspectorTab === 'prototype'
+                ? 'text-white border-white font-bold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Prototype
+          </button>
         </div>
+
+        <span className="text-[11px] font-mono text-zinc-400 capitalize">
+          {activeBreakpoint}
+        </span>
+      </div>
+
+      {/* 3. PAGE SECTION: Color swatch 1E1E1E 100% Eye & Page Height */}
+      <div className="p-3 border-b border-[#383838] space-y-2">
+        <span className="text-xs font-bold text-white block">Page</span>
+        <div className="flex items-center gap-2">
+          <div
+            className="w-5 h-5 rounded border border-white/20 shrink-0 shadow-inner"
+            style={{ backgroundColor: '#1e1e1e' }}
+          />
+          <span className="text-xs font-mono text-zinc-300 uppercase font-semibold">1E1E1E</span>
+          <span className="text-xs font-mono text-zinc-500 ml-auto">100 %</span>
+          <Eye className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300 cursor-pointer" />
+        </div>
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-[10px] text-zinc-400">Page Height</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono text-zinc-300">
+              {activePage?.root?.styles?.minHeight || '800px'}
+            </span>
+            <button
+              type="button"
+              title="Reset page to default height (800px)"
+              onClick={() => {
+                if (activePage?.root) {
+                  updateStyles(activePage.root.id, { minHeight: '800px', height: undefined });
+                }
+              }}
+              className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-[#0d99ff]/20 text-zinc-400 hover:text-[#0d99ff] border border-white/10 transition-colors cursor-pointer"
+            >
+              Default (800px)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. STYLES & EXPORT SECTIONS (Matches Figma Screenshot) */}
+      <div className="px-3 py-2 border-b border-[#383838] flex items-center justify-between text-xs text-zinc-300">
+        <span className="font-semibold text-white">Styles</span>
+        <button
+          type="button"
+          title="Add Style"
+          className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <div className="px-3 py-2 border-b border-[#383838] flex items-center justify-between text-xs text-zinc-300">
+        <span className="font-semibold text-white">Export</span>
+        <button
+          type="button"
+          title="Export JSON file"
+          onClick={handleExportJson}
+          className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       <div className="p-4 space-y-5 text-xs text-zinc-300">
@@ -884,7 +1040,32 @@ export default function PropertiesInspector() {
                   onChange={(e) => handleStyleChange('width', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
+                <div className="flex items-center gap-1 pt-0.5">
+                  <button
+                    type="button"
+                    title="Make width same as page (100%)"
+                    onClick={() => {
+                      handleStyleChange('width', '100%');
+                      handleStyleChange('maxWidth', '100%');
+                      if (effectiveStyles.position === 'absolute') {
+                        handleStyleChange('left', '0px');
+                      }
+                    }}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-[#0d99ff]/20 text-zinc-400 hover:text-[#0d99ff] border border-white/5 hover:border-[#0d99ff]/40 transition-colors cursor-pointer"
+                  >
+                    100% (Page)
+                  </button>
+                  <button
+                    type="button"
+                    title="Reset to auto width"
+                    onClick={() => handleStyleChange('width', 'auto')}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Auto
+                  </button>
+                </div>
               </div>
+
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] text-zinc-400">Height</label>
@@ -905,27 +1086,60 @@ export default function PropertiesInspector() {
                   onChange={(e) => handleStyleChange('height', e.target.value)}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
+                <div className="flex items-center gap-1 pt-0.5">
+                  <button
+                    type="button"
+                    title="Make height same as page (100%)"
+                    onClick={() => {
+                      handleStyleChange('height', '100%');
+                      if (effectiveStyles.position === 'absolute') {
+                        handleStyleChange('top', '0px');
+                      }
+                    }}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-[#0d99ff]/20 text-zinc-400 hover:text-[#0d99ff] border border-white/5 hover:border-[#0d99ff]/40 transition-colors cursor-pointer"
+                  >
+                    100% (Page)
+                  </button>
+                  <button
+                    type="button"
+                    title="Set to viewport height"
+                    onClick={() => handleStyleChange('height', '100vh')}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    100vh
+                  </button>
+                  <button
+                    type="button"
+                    title="Set to default / auto height"
+                    onClick={() => handleStyleChange('height', 'auto')}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Default
+                  </button>
+                  <button
+                    type="button"
+                    title="Set to 800px default height"
+                    onClick={() => handleStyleChange('height', '800px')}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    800px
+                  </button>
+                </div>
               </div>
             </div>
 
+            {/* TOP & BOTTOM BORDER RADIUS */}
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <label className="text-[10px] text-zinc-400">Border Radius</label>
-                <input
-                  type="text"
-                  value={effectiveStyles.borderRadius || ''}
-                  placeholder="8px"
-                  onChange={(e) => handleStyleChange('borderRadius', e.target.value)}
-                  className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
-                />
-              </div>
-              <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] text-zinc-400">Max Width</label>
-                  {isOverriddenAtBreakpoint('maxWidth') && (
+                  <label className="text-[10px] text-zinc-400">Top Border Radius</label>
+                  {isOverriddenAtBreakpoint('borderTopLeftRadius') && (
                     <button
                       type="button"
-                      onClick={() => handleResetOverride('maxWidth')}
+                      onClick={() => {
+                        handleResetOverride('borderTopLeftRadius');
+                        handleResetOverride('borderTopRightRadius');
+                      }}
                       className="text-[9px] text-amber-400 underline cursor-pointer"
                     >
                       Reset
@@ -934,12 +1148,71 @@ export default function PropertiesInspector() {
                 </div>
                 <input
                   type="text"
-                  value={effectiveStyles.maxWidth || ''}
-                  placeholder="100%"
-                  onChange={(e) => handleStyleChange('maxWidth', e.target.value)}
+                  value={effectiveStyles.borderTopLeftRadius || effectiveStyles.borderRadius || ''}
+                  placeholder="0px"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateStyles(id, {
+                      borderTopLeftRadius: val,
+                      borderTopRightRadius: val,
+                    }, true);
+                  }}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
               </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-zinc-400">Bottom Border Radius</label>
+                  {isOverriddenAtBreakpoint('borderBottomLeftRadius') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleResetOverride('borderBottomLeftRadius');
+                        handleResetOverride('borderBottomRightRadius');
+                      }}
+                      className="text-[9px] text-amber-400 underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={effectiveStyles.borderBottomLeftRadius || effectiveStyles.borderRadius || ''}
+                  placeholder="0px"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateStyles(id, {
+                      borderBottomLeftRadius: val,
+                      borderBottomRightRadius: val,
+                    }, true);
+                  }}
+                  className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] text-zinc-400">Max Width</label>
+                {isOverriddenAtBreakpoint('maxWidth') && (
+                  <button
+                    type="button"
+                    onClick={() => handleResetOverride('maxWidth')}
+                    className="text-[9px] text-amber-400 underline cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={effectiveStyles.maxWidth || ''}
+                placeholder="100%"
+                onChange={(e) => handleStyleChange('maxWidth', e.target.value)}
+                className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
+              />
             </div>
           </div>
         </div>
@@ -970,9 +1243,12 @@ export default function PropertiesInspector() {
                   type="number"
                   value={parseTranslate(effectiveStyles.transform).x}
                   onChange={(e) => {
-                    const x = parseFloat(e.target.value) || 0;
-                    const y = parseTranslate(effectiveStyles.transform).y;
-                    handleStyleChange('transform', `translate(${x}px, ${y}px)`);
+                    const rawX = parseFloat(e.target.value) || 0;
+                    const cur = parseTranslate(effectiveStyles.transform);
+                    const el = document.querySelector(`[data-node-id="${id}"]`);
+                    const bounds = computeCanvasBounds(el, cur, 1);
+                    const clampedX = Math.max(bounds.minX, Math.min(bounds.maxX, rawX));
+                    handleStyleChange('transform', `translate(${clampedX}px, ${cur.y}px)`);
                   }}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
@@ -983,14 +1259,49 @@ export default function PropertiesInspector() {
                   type="number"
                   value={parseTranslate(effectiveStyles.transform).y}
                   onChange={(e) => {
-                    const x = parseTranslate(effectiveStyles.transform).x;
-                    const y = parseFloat(e.target.value) || 0;
-                    handleStyleChange('transform', `translate(${x}px, ${y}px)`);
+                    const rawY = parseFloat(e.target.value) || 0;
+                    const cur = parseTranslate(effectiveStyles.transform);
+                    const el = document.querySelector(`[data-node-id="${id}"]`);
+                    const bounds = computeCanvasBounds(el, cur, 1);
+                    const clampedY = Math.max(bounds.minY, Math.min(bounds.maxY, rawY));
+                    handleStyleChange('transform', `translate(${cur.x}px, ${clampedY}px)`);
                   }}
                   className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-white/10 text-white text-xs font-mono"
                 />
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 5. CRAFTIFY AI WEB COPILOT WIDGET */}
+        {showAgentBanner && (
+          <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 space-y-2 mt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-violet-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAgentBanner(false)}
+                className="text-zinc-500 hover:text-zinc-300 cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+
+            <h5 className="font-bold text-xs text-white">Craftify AI Web Copilot</h5>
+            <p className="text-[10px] text-zinc-400 leading-relaxed">
+              Generate web layouts, write copy, or auto-audit design and accessibility with AI.
+            </p>
+
+            <button
+              type="button"
+              className="w-full py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-semibold cursor-pointer transition-colors"
+            >
+              Explore AI Copilot
+            </button>
           </div>
         )}
       </div>

@@ -275,9 +275,10 @@ export function EditorProvider({ initialProject, onToast, children }) {
 
   /**
    * Command: createPage
+   * Creates a new page, copying the format and layout structure of Page 1 / base page by default.
    */
   const createPage = useCallback(
-    (name, customPath = null) => {
+    (name, customPath = null, options = {}) => {
       const pageName = (name || '').trim() || 'Untitled Page';
       const rawSlug = customPath || generateSlug(pageName);
       const uniquePath = getUniquePath(rawSlug);
@@ -289,6 +290,46 @@ export function EditorProvider({ initialProject, onToast, children }) {
       }
 
       const newPageId = generateId('page');
+
+      // Determine template / format base (defaults to Page 1 if present)
+      const basePageId = options?.copyFormatFromPageId;
+      const basePage = basePageId
+        ? project?.pages?.find((p) => p.id === basePageId)
+        : (project?.pages && project.pages.length > 0 ? project.pages[0] : null);
+
+      const shouldCopyFormat = options?.copyFormat !== false && basePage && basePage.root;
+
+      let newPageRoot;
+      if (shouldCopyFormat) {
+        // Deep-clone the entire structure from Page 1 so it has the exact same format & styling
+        const cloned = cloneNode(basePage.root);
+        cloned.id = generateId('root');
+        cloned.name = `${pageName} Root`;
+        if (cloned.props) {
+          cloned.props.title = pageName;
+        }
+
+        // Update the primary heading in the cloned page to match the new page title
+        const updatePrimaryHeading = (node) => {
+          if (!node) return false;
+          if (node.type === 'Heading' && node.props) {
+            node.props.text = pageName;
+            return true;
+          }
+          if (Array.isArray(node.children)) {
+            for (const child of node.children) {
+              if (updatePrimaryHeading(child)) return true;
+            }
+          }
+          return false;
+        };
+        updatePrimaryHeading(cloned);
+
+        newPageRoot = cloned;
+      } else {
+        newPageRoot = createNode('Page', { name: `${pageName} Root` });
+      }
+
       const newPage = {
         id: newPageId,
         name: pageName,
@@ -296,7 +337,7 @@ export function EditorProvider({ initialProject, onToast, children }) {
         isHome: false,
         title: pageName,
         metaDescription: '',
-        root: createNode('Page', { name: `${pageName} Root` }),
+        root: newPageRoot,
       };
 
       const updatedProject = {
@@ -312,7 +353,7 @@ export function EditorProvider({ initialProject, onToast, children }) {
       setActivePageIdState(newPageId);
       setSelectedNodeIdState(newPage.root.id);
 
-      if (onToast) onToast(`Page "${pageName}" created.`, 'success');
+      if (onToast) onToast(`Page "${pageName}" created with same format.`, 'success');
       return { ok: true, page: newPage };
     },
     [project, commitDocument, getUniquePath, onToast]
@@ -645,7 +686,7 @@ export function EditorProvider({ initialProject, onToast, children }) {
    * Command: addNode
    */
   const addNode = useCallback(
-    (type, targetParentId = null, index = -1) => {
+    (type, targetParentId = null, index = -1, customOverrides = {}) => {
       if (!activePage?.root) {
         return { ok: false, error: 'No active page found.' };
       }
@@ -653,49 +694,26 @@ export function EditorProvider({ initialProject, onToast, children }) {
       let parentId = targetParentId;
       let finalIndex = index;
 
-      const findFirstValidContainer = (node) => {
-        if (!node) return null;
-        if (canNest(node.type, type)) return node.id;
-        if (Array.isArray(node.children)) {
-          for (const child of node.children) {
-            const found = findFirstValidContainer(child);
-            if (found) return found;
-          }
-        }
-        return null;
-      };
+      const isTextType = ['Heading', 'Text'].includes(type);
 
-      if (!parentId) {
-        if (selectedNode) {
-          if (canNest(selectedNode.type, type)) {
-            parentId = selectedNode.id;
-          } else {
-            const loc = findParent(activePage.root, selectedNode.id);
-            if (loc && canNest(loc.parent.type, type)) {
-              parentId = loc.parent.id;
-              finalIndex = loc.index + 1;
-            }
-          }
-        }
+      // When creating text (Heading or Text) or when createSectionAndContainer is explicitly requested:
+      // ALWAYS auto-create Section -> Container -> Text/Heading on the page!
+      const shouldCreateSectionAndContainer =
+        customOverrides?.createSectionAndContainer ||
+        (!targetParentId && isTextType) ||
+        (targetParentId === activePage.root.id && isTextType);
 
-        if (!parentId && canNest(activePage.root.type, type)) {
-          parentId = activePage.root.id;
-        }
-
-        if (!parentId) {
-          parentId = findFirstValidContainer(activePage.root);
-        }
-      }
-
-      if (!parentId && activePage.root.type === 'Page') {
-        const autoSection = createNode('Section', { name: 'New Section' });
-        const autoContainer = createNode('Container', { name: 'Main Container' });
-        const centerStyles = ['Heading', 'Text'].includes(type)
-          ? { textAlign: 'center', margin: '0 auto' }
-          : ['Button', 'Image'].includes(type)
-            ? { margin: '0 auto' }
-            : {};
-        const newNode = createNode(type, { styles: centerStyles });
+      if (shouldCreateSectionAndContainer && activePage.root.type === 'Page') {
+        const autoSection = createNode('Section', { name: 'Section' });
+        const autoContainer = createNode('Container', { name: 'Container' });
+        const centerStyles = { textAlign: 'center', margin: '0 auto' };
+        const newNode = createNode(type, {
+          ...customOverrides,
+          styles: {
+            ...centerStyles,
+            ...(customOverrides.styles || {}),
+          },
+        });
         autoContainer.children.push(newNode);
         autoSection.children.push(autoContainer);
 
@@ -712,7 +730,122 @@ export function EditorProvider({ initialProject, onToast, children }) {
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 80);
 
-        if (onToast) onToast(`Added ${NODE_REGISTRY[type]?.label || type}`, 'success');
+        if (onToast) onToast(`Created Section > Container > ${newNode.name || type}`, 'success');
+        return { ok: true, node: newNode, section: autoSection, container: autoContainer };
+      }
+
+      const isShapeNode = (node) => {
+        if (!node) return false;
+        const SHAPE_NAMES = ['Rectangle', 'Line', 'Arrow', 'Ellipse', 'Polygon', 'Star', 'Image'];
+        return (
+          SHAPE_NAMES.includes(node.name) ||
+          node.styles?.position === 'absolute' ||
+          Boolean(node.styles?.clipPath)
+        );
+      };
+
+      const findFirstValidContainer = (node) => {
+        if (!node) return null;
+        if (canNest(node.type, type) && !isShapeNode(node)) return node.id;
+        if (Array.isArray(node.children)) {
+          for (const child of node.children) {
+            const found = findFirstValidContainer(child);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const isTextOrMedia = ['Heading', 'Text', 'Button', 'Image'].includes(type);
+
+      if (!parentId) {
+        if (selectedNode) {
+          // If selectedNode is a shape, never dump text or elements inside it unless explicitly targeted
+          if (isShapeNode(selectedNode)) {
+            parentId = null;
+          } else if (canNest(selectedNode.type, type)) {
+            parentId = selectedNode.id;
+          } else {
+            const loc = findParent(activePage.root, selectedNode.id);
+            if (loc && canNest(loc.parent.type, type) && !isShapeNode(loc.parent)) {
+              parentId = loc.parent.id;
+              finalIndex = loc.index + 1;
+            }
+          }
+        }
+
+        if (!parentId && canNest(activePage.root.type, type)) {
+          parentId = activePage.root.id;
+        }
+
+        // Never eagerly dump text or media into arbitrary first container
+        if (!parentId && !isTextOrMedia) {
+          parentId = findFirstValidContainer(activePage.root);
+        }
+      }
+
+      // If user selected a Section and is adding text without a container, create a Container inside that Section
+      if (!parentId && selectedNode?.type === 'Section' && !customOverrides?.createSectionAndContainer) {
+        const autoContainer = createNode('Container', { name: 'Main Container' });
+        const centerStyles = ['Heading', 'Text'].includes(type)
+          ? { textAlign: 'center', margin: '0 auto' }
+          : ['Button', 'Image'].includes(type)
+            ? { margin: '0 auto' }
+            : {};
+        const newNode = createNode(type, {
+          ...customOverrides,
+          styles: {
+            ...centerStyles,
+            ...(customOverrides.styles || {}),
+          },
+        });
+        autoContainer.children.push(newNode);
+        const newRoot = insertNode(activePage.root, selectedNode.id, autoContainer);
+
+        setPageRoot(newRoot);
+        setSelectedNodeId(newNode.id);
+
+        setTimeout(() => {
+          const el = document.querySelector(`[data-node-id="${newNode.id}"]`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 80);
+
+        if (onToast) onToast(`Added ${customOverrides.name || NODE_REGISTRY[type]?.label || type} (with Container)`, 'success');
+        return { ok: true, node: newNode };
+      }
+
+      if (!parentId && activePage.root.type === 'Page') {
+        const autoSection = createNode('Section', { name: 'New Section' });
+        const autoContainer = createNode('Container', { name: 'Main Container' });
+        const centerStyles = ['Heading', 'Text'].includes(type)
+          ? { textAlign: 'center', margin: '0 auto' }
+          : ['Button', 'Image'].includes(type)
+            ? { margin: '0 auto' }
+            : {};
+        const newNode = createNode(type, {
+          ...customOverrides,
+          styles: {
+            ...centerStyles,
+            ...(customOverrides.styles || {}),
+          },
+        });
+        autoContainer.children.push(newNode);
+        autoSection.children.push(autoContainer);
+
+        const newRoot = {
+          ...activePage.root,
+          children: [...(activePage.root.children || []), autoSection],
+        };
+
+        setPageRoot(newRoot);
+        setSelectedNodeId(newNode.id);
+
+        setTimeout(() => {
+          const el = document.querySelector(`[data-node-id="${newNode.id}"]`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 80);
+
+        if (onToast) onToast(`Added ${customOverrides.name || NODE_REGISTRY[type]?.label || type} (Section & Container)`, 'success');
         return { ok: true, node: newNode };
       }
 
@@ -739,7 +872,13 @@ export function EditorProvider({ initialProject, onToast, children }) {
           ? { margin: '0 auto' }
           : {};
 
-      const newNode = createNode(type, { styles: centerStyles });
+      const newNode = createNode(type, {
+        ...customOverrides,
+        styles: {
+          ...centerStyles,
+          ...(customOverrides.styles || {}),
+        },
+      });
       const newRoot = insertNode(activePage.root, parentId, newNode, finalIndex);
 
       setPageRoot(newRoot);

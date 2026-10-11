@@ -9,7 +9,8 @@ A modern, high-performance visual website builder where users design responsive 
 Comprehensive architecture, testing, and multi-tenant security plans:
 - [Architecture & Tech Stack Documentation](file:///d:/Ai-web-builder/docs/ARCHITECTURE.md)
 - [Document Model Specification](file:///d:/Ai-web-builder/docs/DOCUMENT_MODEL.md)
-- [Visual Editor Architecture (Phase 2)](file:///d:/Ai-web-builder/docs/EDITOR.md)
+- [Visual Editor Architecture (Phase 2 & Figma UI Structure)](file:///d:/Ai-web-builder/docs/EDITOR.md)
+- [Responsive Design & Breakpoints Specification](file:///d:/Ai-web-builder/docs/RESPONSIVE.md)
 - [Authentication Smoke Test Matrix](file:///d:/Ai-web-builder/docs/AUTH_SMOKE_TEST.md)
 - [Project Ownership & Authorization Plan](file:///d:/Ai-web-builder/docs/OWNERSHIP_PLAN.md)
 

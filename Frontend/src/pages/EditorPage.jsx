@@ -6,6 +6,7 @@ import { validateProject, migrateProject } from '../builder/model/index.js';
 import { EditorProvider, useEditorStore } from '../builder/store/editorContext.jsx';
 import ComponentPalette from '../builder/editor/ComponentPalette.jsx';
 import LayersPanel from '../builder/editor/LayersPanel.jsx';
+import FigmaLeftSidebar from '../builder/editor/FigmaLeftSidebar.jsx';
 import CanvasRenderer from '../builder/editor/CanvasRenderer.jsx';
 import PropertiesInspector from '../builder/editor/PropertiesInspector.jsx';
 import WarningsPanel from '../builder/editor/WarningsPanel.jsx';
@@ -407,17 +408,15 @@ export default function EditorPage({ projectId }) {
 
   return (
     <EditorProvider initialProject={initialProject} onToast={showToast}>
-      <div className="h-screen w-screen bg-[#09090b] text-zinc-100 flex flex-col overflow-hidden font-sans select-none relative">
-        {/* Top Metallic Toolbar */}
-        <EditorToolbar onToast={showToast} />
+      <div className="h-screen w-screen bg-[#1e1e1e] text-zinc-100 flex overflow-hidden font-sans select-none relative">
+        {/* Left Rail & Drawer (Pages, Add Elements, Media, Audit, Theme) */}
+        <FigmaLeftSidebar />
 
-        {/* 4-Column Workspace: Palette | Layers | Canvas | Inspector */}
-        <div className="flex-1 flex overflow-hidden relative">
-          <ComponentPalette />
-          <LayersPanel />
-          <CanvasRenderer />
-          <PropertiesInspector />
-        </div>
+        {/* Center Infinite Canvas with Centered Floating Dock & Pan/Zoom */}
+        <CanvasRenderer />
+
+        {/* Right Inspector (Top Profile/Play/Share, Design/Prototype, Color Swatch, Properties) */}
+        <PropertiesInspector />
 
         {/* Toast Notification */}
         <Toast message={toast.message} type={toast.type} onClose={closeToast} />
